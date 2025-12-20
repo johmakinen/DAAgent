@@ -7,26 +7,40 @@ interface MessageBubbleProps {
 }
 
 export default function MessageBubble({ message }: MessageBubbleProps) {
+  const hasResponse = message.response && message.response.trim().length > 0;
+  
   return (
     <div className="space-y-4">
       {/* User message */}
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-indigo-600 px-4 py-2 text-white shadow-md dark:bg-indigo-500">
-          <p className="text-sm">{message.message}</p>
+        <div className="max-w-[80%] rounded-lg rounded-tr-sm px-4 py-3 shadow-sm" style={{ backgroundColor: 'hsl(var(--chat-user-bg))', color: 'hsl(var(--chat-user-fg))' }}>
+          <p className="text-base">{message.message}</p>
         </div>
       </div>
       
-      {/* Bot response */}
-      <div className="flex justify-start">
-        <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-gray-100 px-4 py-2 shadow-md dark:bg-gray-700 dark:text-gray-100">
-          <p className="text-sm whitespace-pre-wrap">{message.response}</p>
-          {message.intent_type && (
-            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              Intent: {message.intent_type}
-            </p>
-          )}
+      {/* Bot response - only show if there's a response or show loading indicator */}
+      {hasResponse ? (
+        <div className="flex justify-start">
+          <div className="max-w-[80%] rounded-lg rounded-tl-sm px-4 py-3 shadow-sm border border-border/50" style={{ backgroundColor: 'hsl(var(--chat-bot-bg))', color: 'hsl(var(--chat-bot-fg))' }}>
+            <p className="text-base whitespace-pre-wrap">{message.response}</p>
+            {message.intent_type && (
+              <p className="mt-2 text-sm opacity-70">
+                Intent: {message.intent_type}
+              </p>
+            )}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex justify-start">
+          <div className="max-w-[80%] rounded-lg rounded-tl-sm px-4 py-3 shadow-sm border border-border/50" style={{ backgroundColor: 'hsl(var(--chat-bot-bg))', color: 'hsl(var(--chat-bot-fg))' }}>
+            <div className="flex items-center gap-2">
+              <div className="h-2 w-2 animate-bounce rounded-full opacity-60"></div>
+              <div className="h-2 w-2 animate-bounce rounded-full opacity-60" style={{ animationDelay: '0.2s' }}></div>
+              <div className="h-2 w-2 animate-bounce rounded-full opacity-60" style={{ animationDelay: '0.4s' }}></div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

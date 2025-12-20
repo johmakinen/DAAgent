@@ -1,3 +1,6 @@
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+
 interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
@@ -15,21 +18,20 @@ export default function ChatInput({ value, onChange, onSubmit, disabled }: ChatI
 
   return (
     <form onSubmit={handleSubmit} className="flex gap-2">
-      <input
+      <Input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         placeholder="Type your message..."
-        className="flex-1 rounded-lg border border-gray-300 px-4 py-2 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-indigo-400 dark:focus:ring-indigo-400"
+        className="flex-1"
       />
-      <button
+      <Button
         type="submit"
         disabled={disabled || !value.trim()}
-        className="rounded-lg bg-indigo-600 px-6 py-2 font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-indigo-500 dark:hover:bg-indigo-600"
       >
         Send
-      </button>
+      </Button>
     </form>
   );
 }

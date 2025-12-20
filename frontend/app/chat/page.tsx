@@ -55,15 +55,26 @@ export default function ChatPage() {
 
     const userMessage = input.trim();
     setInput('');
+    
+    // Optimistically add the user's message immediately
+    const optimisticMessage: ChatMessage = {
+      id: Date.now(), // Temporary ID
+      message: userMessage,
+      response: '', // Will be filled when response arrives
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimisticMessage]);
     setLoading(true);
 
     try {
       const response = await apiClient.chat(userMessage);
       
-      // Reload history to get the message with proper database ID
+      // Reload history to get the message with proper database ID and response
       await loadHistory();
     } catch (error) {
       console.error('Failed to send message:', error);
+      // Remove the optimistic message on error
+      setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessage.id));
       alert(error instanceof Error ? error.message : 'Failed to send message');
     } finally {
       setLoading(false);
@@ -92,15 +103,25 @@ export default function ChatPage() {
   const handleExampleClick = async (question: string) => {
     if (loading) return;
 
+    // Optimistically add the user's message immediately
+    const optimisticMessage: ChatMessage = {
+      id: Date.now(), // Temporary ID
+      message: question,
+      response: '', // Will be filled when response arrives
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimisticMessage]);
     setLoading(true);
 
     try {
       await apiClient.chat(question);
       
-      // Reload history to get the message with proper database ID
+      // Reload history to get the message with proper database ID and response
       await loadHistory();
     } catch (error) {
       console.error('Failed to send message:', error);
+      // Remove the optimistic message on error
+      setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessage.id));
       alert(error instanceof Error ? error.message : 'Failed to send message');
     } finally {
       setLoading(false);
@@ -109,26 +130,26 @@ export default function ChatPage() {
 
   if (loadingHistory) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center">
-          <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent mx-auto"></div>
-          <p className="text-gray-600 dark:text-gray-400">Loading chat history...</p>
+          <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto"></div>
+          <p className="text-muted-foreground">Loading chat history...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen flex-col bg-gray-50 dark:bg-gray-900">
+    <div className="flex h-screen flex-col bg-background">
       {/* Header */}
-      <header className="border-b border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      <header className="border-b border-border px-4 py-3 shadow-sm" style={{ backgroundColor: 'hsl(var(--header-bg))', color: 'hsl(var(--header-fg))' }}>
         <div className="mx-auto flex max-w-4xl items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Agent app</h1>
+          <h1 className="text-2xl font-bold">Agent app</h1>
           <div className="flex gap-2">
             <ResetButton onReset={handleReset} disabled={loading || messages.length === 0} />
             <button
               onClick={handleLogout}
-              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+              className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
             >
               Logout
             </button>
@@ -141,33 +162,63 @@ export default function ChatPage() {
         {messages.length === 0 ? (
           <div className="flex h-full min-h-[calc(100vh-200px)] flex-col items-center justify-center">
             <div className="mx-auto w-full max-w-2xl space-y-4">
-              <p className="mb-6 text-center text-gray-500 dark:text-gray-400">
+              <p className="mb-6 text-center text-muted-foreground text-lg">
                 No messages yet. Start a conversation!
               </p>
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
+              <p className="text-base font-medium text-foreground mb-4">
                 Try asking one of these questions:
               </p>
               <div className="space-y-3">
                 <button
                   onClick={() => handleExampleClick('What are the averages of the petal lengths for each species in the dataset?')}
                   disabled={loading}
-                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-left text-sm text-gray-700 shadow-sm transition-all hover:border-indigo-300 hover:bg-indigo-50 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-indigo-500 dark:hover:bg-gray-600"
+                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ 
+                    backgroundColor: 'hsl(var(--accent-blue))',
+                    color: 'hsl(var(--foreground))',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(188, 30%, 82%)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-blue))';
+                  }}
                 >
                   What are the averages of the petal lengths for each species in the dataset?
                 </button>
                 <button
                   onClick={() => handleExampleClick('What is the maximum sepal width for each species?')}
                   disabled={loading}
-                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-left text-sm text-gray-700 shadow-sm transition-all hover:border-indigo-300 hover:bg-indigo-50 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-indigo-500 dark:hover:bg-gray-600"
+                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ 
+                    backgroundColor: 'hsl(var(--accent-green))',
+                    color: 'hsl(var(--foreground))',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(95, 10%, 60%)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-green))';
+                  }}
                 >
                   What is the maximum sepal width for each species?
                 </button>
                 <button
-                  onClick={() => handleExampleClick('How many records are there for each species in the dataset?')}
+                  onClick={() => handleExampleClick('How many of the setosa samples are larger in sepal width than versicolors?')}
                   disabled={loading}
-                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-left text-sm text-gray-700 shadow-sm transition-all hover:border-indigo-300 hover:bg-indigo-50 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-indigo-500 dark:hover:bg-gray-600"
+                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ 
+                    backgroundColor: 'hsl(var(--accent-yellow))',
+                    color: 'hsl(var(--foreground))',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(57, 87%, 78%)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-yellow))';
+                  }}
                 >
-                  How many records are there for each species in the dataset?
+                  How many of the setosa samples are larger in sepal width than versicolors?
                 </button>
               </div>
             </div>
@@ -177,13 +228,14 @@ export default function ChatPage() {
             {messages.map((message) => (
               <MessageBubble key={message.id} message={message} />
             ))}
-            {loading && (
+            {/* Only show loading indicator if there are no optimistic messages waiting for response */}
+            {loading && messages.length > 0 && messages[messages.length - 1].response && (
               <div className="flex justify-start">
-                <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-gray-100 px-4 py-2 shadow-md dark:bg-gray-700">
+                <div className="max-w-[80%] rounded-lg rounded-tl-sm px-4 py-3 shadow-sm border border-border/50" style={{ backgroundColor: 'hsl(var(--chat-bot-bg))', color: 'hsl(var(--chat-bot-fg))' }}>
                   <div className="flex items-center gap-2">
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400"></div>
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" style={{ animationDelay: '0.2s' }}></div>
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" style={{ animationDelay: '0.4s' }}></div>
+                    <div className="h-2 w-2 animate-bounce rounded-full opacity-60"></div>
+                    <div className="h-2 w-2 animate-bounce rounded-full opacity-60" style={{ animationDelay: '0.2s' }}></div>
+                    <div className="h-2 w-2 animate-bounce rounded-full opacity-60" style={{ animationDelay: '0.4s' }}></div>
                   </div>
                 </div>
               </div>
@@ -194,7 +246,7 @@ export default function ChatPage() {
       </div>
 
       {/* Input area */}
-      <div className="border-t border-gray-200 bg-white px-4 py-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      <div className="border-t border-border bg-card px-4 py-4 shadow-sm">
         <div className="mx-auto max-w-4xl">
           <ChatInput
             value={input}
