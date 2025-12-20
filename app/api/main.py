@@ -3,7 +3,14 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta
 import os
+import uuid
+import json
+import logging
 from dotenv import load_dotenv
+from typing import Optional, List
+from pydantic_ai import ModelMessage, UserPromptPart, TextPart, ModelRequest, ModelResponse
+
+logger = logging.getLogger(__name__)
 
 from app.api.models import (
     LoginRequest,
@@ -107,6 +114,29 @@ async def login(request: LoginRequest):
     )
 
 
+def _convert_history_to_messages(history: List[dict]) -> List[ModelMessage]:
+    """
+    Convert database chat history to pydantic_ai ModelMessage format.
+    
+    Args:
+        history: List of chat message dicts from database
+        
+    Returns:
+        List of ModelMessage objects
+    """
+    messages = []
+    for msg in history:
+        # Add user message
+        user_msg = ModelRequest(parts=[UserPromptPart(content=msg["message"])])
+        messages.append(user_msg)
+        
+        # Add assistant response
+        assistant_msg = ModelResponse(parts=[TextPart(content=msg["response"])])
+        messages.append(assistant_msg)
+    
+    return messages
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
@@ -116,17 +146,29 @@ async def chat(
     Send a chat message and get a response.
     
     Args:
-        request: Chat message request
+        request: Chat message request (optionally includes session_id)
         current_user: Current authenticated user
         
     Returns:
         Chat response from the agent
     """
-    # Create user message
-    user_message = UserMessage(content=request.message)
+    # Generate session_id (one session per user for now)
+    # In production, you might want to allow multiple sessions per user
+    session_id = f"user_{current_user['id']}"
     
-    # Get response from orchestrator
-    agent_response = await orchestrator.chat(user_message)
+    # Load conversation history from database
+    history = db.get_chat_history(current_user["id"])
+    message_history = _convert_history_to_messages(history) if history else None
+    
+    # Create user message with session_id and username
+    user_message = UserMessage(
+        content=request.message, 
+        session_id=session_id,
+        username=current_user.get("username")
+    )
+    
+    # Get response from orchestrator with message history
+    agent_response = await orchestrator.chat(user_message, message_history=message_history)
     
     # Save to database
     intent_type = agent_response.metadata.get("intent_type") if agent_response.metadata else None
@@ -160,17 +202,18 @@ async def get_chat_history(
     """
     messages = db.get_chat_history(current_user["id"])
     
-    chat_messages = [
-        ChatMessage(
-            id=msg["id"],
-            message=msg["message"],
-            response=msg["response"],
-            intent_type=msg["intent_type"],
-            metadata=msg["metadata"],
-            created_at=msg["created_at"]
+    chat_messages = []
+    for msg in messages:
+        chat_messages.append(
+            ChatMessage(
+                id=msg["id"],
+                message=msg["message"],
+                response=msg["response"],
+                intent_type=msg["intent_type"],
+                metadata=msg["metadata"],
+                created_at=msg["created_at"]
+            )
         )
-        for msg in messages
-    ]
     
     return ChatHistoryResponse(messages=chat_messages)
 
@@ -189,5 +232,10 @@ async def reset_chat_history(
         Confirmation message
     """
     deleted_count = db.delete_chat_history(current_user["id"])
+    
+    # Clear session state in orchestrator
+    session_id = f"user_{current_user['id']}"
+    orchestrator.reset(session_id=session_id)
+    
     return {"message": f"Deleted {deleted_count} messages", "deleted_count": deleted_count}
 

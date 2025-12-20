@@ -1,5 +1,6 @@
 """Synthesizer agent for creating final user-facing responses."""
-from pydantic_ai import Agent
+from pydantic_ai import Agent, ModelMessage
+from typing import Optional, List
 from app.core.models import AgentResponse
 
 
@@ -22,15 +23,19 @@ class SynthesizerAgent:
             output_type=AgentResponse
         )
     
-    async def run(self, context: str):
+    async def run(self, context: str, message_history: Optional[List[ModelMessage]] = None):
         """
         Run the synthesizer agent.
         
         Args:
             context: The context containing agent output to synthesize
+            message_history: Optional message history for conversation context
             
         Returns:
             Agent result with AgentResponse output
         """
-        return await self.agent.run(context)
+        if message_history:
+            return await self.agent.run(context, message_history=message_history)
+        else:
+            return await self.agent.run(context)
 

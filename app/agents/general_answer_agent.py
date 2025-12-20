@@ -1,5 +1,6 @@
 """General answer agent for non-database questions."""
-from pydantic_ai import Agent
+from pydantic_ai import Agent, ModelMessage
+from typing import Optional, List
 from app.core.models import GeneralAnswerOutput
 
 
@@ -22,15 +23,19 @@ class GeneralAnswerAgent:
             output_type=GeneralAnswerOutput
         )
     
-    async def run(self, user_message: str):
+    async def run(self, user_message: str, message_history: Optional[List[ModelMessage]] = None):
         """
         Run the general answer agent.
         
         Args:
             user_message: The user's question to answer
+            message_history: Optional message history for conversation context
             
         Returns:
             Agent result with GeneralAnswerOutput output
         """
-        return await self.agent.run(user_message)
+        if message_history:
+            return await self.agent.run(user_message, message_history=message_history)
+        else:
+            return await self.agent.run(user_message)
 

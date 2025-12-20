@@ -60,17 +60,8 @@ export default function ChatPage() {
     try {
       const response = await apiClient.chat(userMessage);
       
-      // Add new message to the list
-      const newMessage: ChatMessage = {
-        id: Date.now(), // Temporary ID
-        message: userMessage,
-        response: response.response,
-        intent_type: response.intent_type,
-        metadata: response.metadata,
-        created_at: new Date().toISOString(),
-      };
-      
-      setMessages((prev) => [...prev, newMessage]);
+      // Reload history to get the message with proper database ID
+      await loadHistory();
     } catch (error) {
       console.error('Failed to send message:', error);
       alert(error instanceof Error ? error.message : 'Failed to send message');
@@ -96,6 +87,24 @@ export default function ChatPage() {
   const handleLogout = () => {
     apiClient.logout();
     router.push('/login');
+  };
+
+  const handleExampleClick = async (question: string) => {
+    if (loading) return;
+
+    setLoading(true);
+
+    try {
+      await apiClient.chat(question);
+      
+      // Reload history to get the message with proper database ID
+      await loadHistory();
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      alert(error instanceof Error ? error.message : 'Failed to send message');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (loadingHistory) {
@@ -129,31 +138,59 @@ export default function ChatPage() {
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mx-auto max-w-4xl space-y-6">
-          {messages.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
-              <p className="text-center text-gray-500 dark:text-gray-400">
+        {messages.length === 0 ? (
+          <div className="flex h-full min-h-[calc(100vh-200px)] flex-col items-center justify-center">
+            <div className="mx-auto w-full max-w-2xl space-y-4">
+              <p className="mb-6 text-center text-gray-500 dark:text-gray-400">
                 No messages yet. Start a conversation!
               </p>
-            </div>
-          ) : (
-            messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
-            ))
-          )}
-          {loading && (
-            <div className="flex justify-start">
-              <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-gray-100 px-4 py-2 shadow-md dark:bg-gray-700">
-                <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400"></div>
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" style={{ animationDelay: '0.2s' }}></div>
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" style={{ animationDelay: '0.4s' }}></div>
-                </div>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
+                Try asking one of these questions:
+              </p>
+              <div className="space-y-3">
+                <button
+                  onClick={() => handleExampleClick('What are the averages of the petal lengths for each species in the dataset?')}
+                  disabled={loading}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-left text-sm text-gray-700 shadow-sm transition-all hover:border-indigo-300 hover:bg-indigo-50 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-indigo-500 dark:hover:bg-gray-600"
+                >
+                  What are the averages of the petal lengths for each species in the dataset?
+                </button>
+                <button
+                  onClick={() => handleExampleClick('What is the maximum sepal width for each species?')}
+                  disabled={loading}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-left text-sm text-gray-700 shadow-sm transition-all hover:border-indigo-300 hover:bg-indigo-50 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-indigo-500 dark:hover:bg-gray-600"
+                >
+                  What is the maximum sepal width for each species?
+                </button>
+                <button
+                  onClick={() => handleExampleClick('How many records are there for each species in the dataset?')}
+                  disabled={loading}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-left text-sm text-gray-700 shadow-sm transition-all hover:border-indigo-300 hover:bg-indigo-50 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-indigo-500 dark:hover:bg-gray-600"
+                >
+                  How many records are there for each species in the dataset?
+                </button>
               </div>
             </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-4xl space-y-6">
+            {messages.map((message) => (
+              <MessageBubble key={message.id} message={message} />
+            ))}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-gray-100 px-4 py-2 shadow-md dark:bg-gray-700">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400"></div>
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" style={{ animationDelay: '0.2s' }}></div>
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" style={{ animationDelay: '0.4s' }}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
       </div>
 
       {/* Input area */}

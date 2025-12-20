@@ -1,3 +1,5 @@
+'use client';
+
 import { ChatMessage } from '@/lib/api';
 
 interface MessageBubbleProps {
