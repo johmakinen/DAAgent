@@ -38,10 +38,6 @@ class PromptRegistry:
             "When asking for clarification, use the available database information to ask specific questions "
             "(e.g., 'Which species are you interested in?' if the database has a species column and the question is about a specific species)."
         ),
-        "general-answer-agent": (
-            "Answer the user's general question directly and accurately. "
-            "Provide clear, helpful information without using any database tools."
-        ),
         "database-query-agent": (
             "Generate an appropriate SQL query to answer the user's database question.\n\n"
             "{database_pack}\n"

@@ -11,7 +11,6 @@ from app.core.models import (
     AgentResponse, 
     IntentClassification,
     QueryAgentOutput,
-    GeneralAnswerOutput
 )
 
 logger = logging.getLogger(__name__)
@@ -20,7 +19,6 @@ from app.core.pack_loader import DatabasePackLoader
 from app.core.models import DatabasePack
 from app.tools.db_tool import DatabaseTool
 from app.agents.intent_agent import IntentAgent
-from app.agents.general_answer_agent import GeneralAnswerAgent
 from app.agents.database_query_agent import DatabaseQueryAgent
 from app.agents.synthesizer_agent import SynthesizerAgent
 from app.agents.session_manager import SessionManager
@@ -33,9 +31,9 @@ class OrchestratorAgent:
     """
     Multi-agent orchestrator implementing the following flow:
     1. IntentAgent: Classifies user intent and determines if clarification is needed
-    2. Router: Routes to either GeneralAnswerAgent or DatabaseQueryAgent
+    2. Router: Routes general questions directly to SynthesizerAgent, or database questions to DatabaseQueryAgent
     3. DatabaseQueryAgent: Generates SQL query and executes it (if database route)
-    4. SynthesizerAgent: Takes agent output and creates final user-facing response
+    4. SynthesizerAgent: Takes agent output (or user question for general questions) and creates final user-facing response
     """
     
     def __init__(
@@ -74,20 +72,16 @@ class OrchestratorAgent:
         
         # Load prompts from MLflow (or use fallback) with pack injection
         intent_prompt = self.prompt_registry.get_prompt_template("intent-agent", database_pack)
-        general_answer_prompt = self.prompt_registry.get_prompt_template("general-answer-agent", database_pack)
         database_query_prompt = self.prompt_registry.get_prompt_template("database-query-agent", database_pack)
         synthesizer_prompt = self.prompt_registry.get_prompt_template("synthesizer-agent", database_pack)
         
         # Step 1: Intent Agent - Classifies intent and determines if clarification needed
         self.intent_agent = IntentAgent(model, intent_prompt, database_pack)
         
-        # Step 2a: General Answer Agent - Handles non-database questions
-        self.general_answer_agent = GeneralAnswerAgent(model, general_answer_prompt)
-        
-        # Step 2b: Database Query Agent - Generates SQL and executes queries
+        # Step 2: Database Query Agent - Generates SQL and executes queries
         self.database_query_agent = DatabaseQueryAgent(model, database_query_prompt, self.db_tool, database_pack)
         
-        # Step 3: Synthesizer Agent - Creates final user-facing response
+        # Step 3: Synthesizer Agent - Creates final user-facing response (handles both general questions and database results)
         self.synthesizer_agent = SynthesizerAgent(model, synthesizer_prompt)
         
         # Summarizer agent for message history management (use cheaper model)
@@ -115,21 +109,6 @@ class OrchestratorAgent:
         result = await self.intent_agent.run(user_message, message_history=message_history)
         return result.output, result
     
-    @mlflow.trace(name="route_to_general_answer")
-    async def _route_to_general_answer(self, user_message: str, message_history: Optional[List[ModelMessage]] = None) -> tuple[GeneralAnswerOutput, Any]:
-        """
-        Step 2a: Route to general answer agent for non-database questions.
-        
-        Args:
-            user_message: The user's message
-            message_history: Optional message history for context
-        
-        Returns:
-            Tuple of (GeneralAnswerOutput, RunResult) with the answer
-        """
-        result = await self.general_answer_agent.run(user_message, message_history=message_history)
-        return result.output, result
-    
     @mlflow.trace(name="route_to_database_query")
     async def _route_to_database_query(self, user_message: str, message_history: Optional[List[ModelMessage]] = None) -> tuple[QueryAgentOutput, Any]:
         """
@@ -149,23 +128,25 @@ class OrchestratorAgent:
     async def _synthesize_response(
         self, 
         user_message: str,
-        agent_output: GeneralAnswerOutput | QueryAgentOutput,
+        agent_output: Optional[QueryAgentOutput],
         intent_type: Literal["database_query", "general_question"],
         message_history: Optional[List[ModelMessage]] = None
     ) -> tuple[AgentResponse, Any]:
         """
-        Step 3: Synthesize final response from agent output.
+        Step 3: Synthesize final response from agent output or user question.
         
         Args:
             user_message: Original user question
-            agent_output: Output from either general answer or database query agent
+            agent_output: Output from database query agent (None for general questions)
             intent_type: Type of intent that was processed
         
         Returns:
             Tuple of (AgentResponse, RunResult) with final user-facing message
         """
-        # Format agent output for synthesizer
+        # Format context for synthesizer
         if intent_type == "database_query":
+            if agent_output is None:
+                raise ValueError("agent_output must be provided for database_query intent")
             query_output: QueryAgentOutput = agent_output
             context = (
                 f"User question: {user_message}\n\n"
@@ -188,11 +169,8 @@ class OrchestratorAgent:
             else:
                 context += f"Query error: {query_output.query_result.error}"
         else:
-            general_output: GeneralAnswerOutput = agent_output
-            context = (
-                f"User question: {user_message}\n\n"
-                f"Answer: {general_output.answer}"
-            )
+            # For general questions, pass the user question directly to synthesizer
+            context = f"User question: {user_message}"
         
         result = await self.synthesizer_agent.run(context, message_history=message_history)
         return result.output, result
@@ -206,7 +184,7 @@ class OrchestratorAgent:
         1. Check for pending clarification and handle accordingly
         2. IntentAgent classifies intent and checks if clarification needed
         3. If clarification needed, store state and return clarification question
-        4. Router directs to either GeneralAnswerAgent or DatabaseQueryAgent
+        4. Router directs general questions to SynthesizerAgent, or database questions to DatabaseQueryAgent
         5. SynthesizerAgent creates final user-facing response
         
         Args:
@@ -308,18 +286,16 @@ class OrchestratorAgent:
         
         # Step 3: Route to appropriate agent based on intent
         agent_result = None
+        agent_output = None
         if intent.intent_type == "database_query":
             agent_output, agent_result = await self._route_to_database_query(
                 user_message_content,
                 message_history=current_message_history
             )
-        else:
-            agent_output, agent_result = await self._route_to_general_answer(
-                user_message_content,
-                message_history=current_message_history
-            )
         
         # Step 4: Synthesize final response
+        # For general questions, agent_output is None and synthesizer handles the question directly
+        # For database queries, agent_output contains the query results
         response, synthesizer_result = await self._synthesize_response(
             user_message_content,
             agent_output,

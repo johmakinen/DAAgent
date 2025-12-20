@@ -47,12 +47,6 @@ class QueryAgentOutput(BaseModel):
     explanation: str = Field(..., description="Brief explanation of what the query does")
 
 
-class GeneralAnswerOutput(BaseModel):
-    """Output from GeneralAnswerAgent."""
-    answer: str = Field(..., description="The general answer to the user's question")
-    sources: Optional[List[str]] = Field(None, description="Optional sources or references used")
-
-
 class ToolCall(BaseModel):
     """Represents a tool invocation in the execution trace."""
     tool_name: str = Field(..., description="Name of the tool that was called")

@@ -6,7 +6,6 @@ from app.core.models import (
     DatabaseResult,
     IntentClassification,
     QueryAgentOutput,
-    GeneralAnswerOutput,
 )
 
 __all__ = [
@@ -16,6 +15,5 @@ __all__ = [
     "DatabaseResult",
     "IntentClassification",
     "QueryAgentOutput",
-    "GeneralAnswerOutput",
 ]
 
