@@ -26,6 +26,7 @@ class ChatResponse(BaseModel):
     response: str
     intent_type: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    plot_spec: Optional[Dict[str, Any]] = None
 
 
 class ChatMessage(BaseModel):
@@ -35,6 +36,7 @@ class ChatMessage(BaseModel):
     response: str
     intent_type: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    plot_spec: Optional[Dict[str, Any]] = None
     created_at: str
 
 

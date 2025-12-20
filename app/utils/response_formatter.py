@@ -1,6 +1,6 @@
 """Response formatting utilities for agent outputs."""
 from typing import Literal, Optional
-from app.core.models import QueryAgentOutput
+from app.core.models import QueryAgentOutput, ExecutionPlan
 
 
 class ResponseFormatter:
@@ -10,7 +10,8 @@ class ResponseFormatter:
     def format_context_for_synthesizer(
         user_message: str,
         agent_output: Optional[QueryAgentOutput],
-        intent_type: Literal["database_query", "general_question"]
+        intent_type: Literal["database_query", "general_question"],
+        execution_plan: Optional[ExecutionPlan] = None
     ) -> str:
         """
         Format context for synthesizer based on intent type and agent output.
@@ -33,6 +34,18 @@ class ResponseFormatter:
             query_output: QueryAgentOutput = agent_output
             context = (
                 f"User question: {user_message}\n\n"
+            )
+            
+            # Indicate if cached data was used
+            if execution_plan and execution_plan.use_cached_data:
+                context += "Note: Using cached data from a previous query (no new database query executed).\n"
+            
+            # Indicate if a plot will be generated
+            if execution_plan and execution_plan.requires_plot:
+                plot_type_name = execution_plan.plot_type or "visualization"
+                context += f"Note: A {plot_type_name} plot will be generated to visualize the results.\n"
+            
+            context += (
                 f"SQL Query executed: {query_output.sql_query}\n"
                 f"Query explanation: {query_output.explanation}\n"
                 f"Query success: {query_output.query_result.success}\n"
@@ -42,14 +55,23 @@ class ResponseFormatter:
                 if query_output.query_result.row_count == 0:
                     context += "Query returned 0 rows."
                 else:
-                    # Format first few rows for context
-                    rows_str = []
-                    for i, row in enumerate(query_output.query_result.data[:5], 1):
-                        row_str = ", ".join([f"{k}: {v}" for k, v in row.items()])
-                        rows_str.append(f"Row {i}: {row_str}")
-                    context += f"Query returned {query_output.query_result.row_count} row(s):\n" + "\n".join(rows_str)
-                    if query_output.query_result.row_count > 5:
-                        context += f"\n... and {query_output.query_result.row_count - 5} more rows"
+                    # Include column information for plot decisions (no raw data)
+                    if query_output.query_result.data:
+                        columns = list(query_output.query_result.data[0].keys())
+                        # Infer data types
+                        sample_row = query_output.query_result.data[0]
+                        col_info = []
+                        for col in columns:
+                            val = sample_row.get(col)
+                            if val is not None:
+                                if isinstance(val, (int, float)):
+                                    col_info.append(f"{col} (numeric)")
+                                else:
+                                    col_info.append(f"{col} (text)")
+                            else:
+                                col_info.append(f"{col} (unknown)")
+                        
+                        context += f"Query returned {query_output.query_result.row_count} row(s) with columns: {', '.join(col_info)}"
             else:
                 context += f"Query error: {query_output.query_result.error}"
         else:

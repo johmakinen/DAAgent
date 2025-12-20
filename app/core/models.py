@@ -10,20 +10,52 @@ class UserMessage(BaseModel):
     username: Optional[str] = Field(None, description="Optional username for tracing")
 
 
+class PlotSpec(BaseModel):
+    """Vega-Lite plot specification model."""
+    spec: Dict[str, Any] = Field(..., description="Vega-Lite JSON specification")
+    plot_type: str = Field(..., description="Type of plot: 'bar', 'line', 'scatter', or 'histogram'")
+
+
+class SynthesizerOutput(BaseModel):
+    """Output from SynthesizerAgent including plot decision."""
+    message: str = Field(..., description="The agent's response message")
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="Confidence score if applicable")
+    requires_followup: bool = Field(False, description="Whether the response requires user followup")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+    should_generate_plot: bool = Field(False, description="Whether a plot should be generated (only for database queries)")
+    plot_type: Optional[str] = Field(None, description="Type of plot if needed: 'bar', 'line', 'scatter', or 'histogram'")
+    plot_columns: Optional[List[str]] = Field(None, description="Column names to use for the plot")
+
+
 class AgentResponse(BaseModel):
     """Final agent response model with structured output."""
     message: str = Field(..., description="The agent's response message")
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="Confidence score if applicable")
     requires_followup: bool = Field(False, description="Whether the response requires user followup")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+    plot_spec: Optional[PlotSpec] = Field(None, description="Optional Vega-Lite plot specification")
 
 
 class IntentClassification(BaseModel):
-    """Intent classification output from IntentAgent."""
+    """Intent classification output from IntentAgent. (Deprecated: Use ExecutionPlan instead)"""
     intent_type: str = Field(..., description="Type of intent: 'database_query' or 'general_question'")
     requires_clarification: bool = Field(False, description="Whether clarification is needed from the user")
     clarification_question: Optional[str] = Field(None, description="Question to ask user if clarification needed")
     reasoning: str = Field(..., description="Brief reasoning for the intent classification")
+
+
+class ExecutionPlan(BaseModel):
+    """Execution plan created by PlannerAgent."""
+    intent_type: str = Field(..., description="Type of intent: 'database_query' or 'general_question'")
+    requires_clarification: bool = Field(False, description="Whether clarification is needed from the user")
+    clarification_question: Optional[str] = Field(None, description="Question to ask user if clarification needed")
+    reasoning: str = Field(..., description="Brief reasoning for the plan")
+    requires_plot: bool = Field(False, description="Whether a plot is needed for the answer")
+    plot_type: Optional[str] = Field(None, description="Type of plot if needed: 'bar', 'line', 'scatter', or 'histogram'")
+    use_cached_data: bool = Field(False, description="Whether to use cached data instead of new query")
+    cached_data_key: Optional[str] = Field(None, description="Key to identify which cached data to use (e.g., 'latest' or specific identifier)")
+    sql_query: Optional[str] = Field(None, description="SQL query if fetching new data")
+    explanation: str = Field(..., description="Brief explanation of the execution plan")
 
 
 class DatabaseQuery(BaseModel):
@@ -54,24 +86,6 @@ class ToolCall(BaseModel):
     outputs: Optional[Dict[str, Any]] = Field(None, description="Output/result from the tool execution")
     duration_ms: Optional[float] = Field(None, description="Duration of tool execution in milliseconds")
     error: Optional[str] = Field(None, description="Error message if tool execution failed")
-
-
-class AgentStep(BaseModel):
-    """Represents a single agent execution step in the execution trace."""
-    agent_name: str = Field(..., description="Name of the agent (e.g., 'intent-agent', 'database-query-agent')")
-    step_order: int = Field(..., description="Order of this step in the execution flow")
-    inputs: Dict[str, Any] = Field(..., description="Inputs to the agent")
-    outputs: Optional[Dict[str, Any]] = Field(None, description="Outputs from the agent")
-    tool_calls: List[ToolCall] = Field(default_factory=list, description="Tool calls made during this step")
-    duration_ms: Optional[float] = Field(None, description="Duration of agent execution in milliseconds")
-    reasoning: Optional[str] = Field(None, description="Reasoning or explanation if available")
-
-
-class ExecutionTrace(BaseModel):
-    """Complete execution trace of the orchestration flow."""
-    trace_id: Optional[str] = Field(None, description="MLflow trace ID")
-    steps: List[AgentStep] = Field(default_factory=list, description="List of agent execution steps in order")
-    total_duration_ms: Optional[float] = Field(None, description="Total execution duration in milliseconds")
 
 
 class ColumnInfo(BaseModel):

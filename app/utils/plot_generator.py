@@ -1,0 +1,428 @@
+"""Plot generation utility using Altair to create Vega-Lite specifications."""
+import logging
+import re
+import json
+from typing import Optional, List, Dict, Any
+import pandas as pd
+import altair as alt
+
+logger = logging.getLogger(__name__)
+
+
+def _make_json_serializable(obj: Any) -> Any:
+    """
+    Recursively convert non-JSON-serializable objects (like Sets) to JSON-serializable types.
+    
+    Args:
+        obj: Object to convert
+        
+    Returns:
+        JSON-serializable version of the object
+    """
+    if isinstance(obj, set):
+        return list(obj)
+    elif isinstance(obj, dict):
+        return {key: _make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(item) for item in obj]
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    else:
+        # For other types, try to convert to string or use JSON serialization
+        try:
+            json.dumps(obj)
+            return obj
+        except (TypeError, ValueError):
+            # If it can't be serialized, convert to string representation
+            return str(obj)
+
+
+def _ensure_schema_version(spec: Dict[str, Any], target_version: str = "5.17.0") -> Dict[str, Any]:
+    """
+    Ensure the Vega-Lite specification has the correct $schema version.
+    
+    Args:
+        spec: Vega-Lite specification dictionary
+        target_version: Target Vega-Lite version (default: 6.1.0)
+        
+    Returns:
+        Specification with ensured $schema field
+    """
+    if not isinstance(spec, dict):
+        return spec
+    
+    # Ensure $schema is set to the target version
+    spec["$schema"] = f"https://vega.github.io/schema/vega-lite/v{target_version}.json"
+    return spec
+
+
+class PlotGenerator:
+    """Utility class for generating Vega-Lite plot specifications using Altair."""
+    
+    def __init__(self):
+        """Initialize the plot generator."""
+        pass
+    
+    def generate_plot(
+        self,
+        data: List[Dict[str, Any]],
+        plot_type: str,
+        question: str,
+        columns: Optional[List[str]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Generate a Vega-Lite plot specification.
+        
+        Args:
+            data: List of dictionaries representing the data rows
+            plot_type: Type of plot ('bar', 'line', 'scatter', 'histogram')
+            question: Original user question (for context)
+            columns: Optional list of column names to use for the plot
+        
+        Returns:
+            Vega-Lite JSON specification as a dictionary, or None if generation fails
+        """
+        if not data or len(data) == 0:
+            logger.warning("Cannot generate plot: empty data")
+            return None
+        
+        try:
+            # Convert to DataFrame for easier manipulation
+            df = pd.DataFrame(data)
+            
+            # Infer columns if not provided
+            if columns is None or len(columns) == 0:
+                columns = list(df.columns)
+            
+            # Filter to only existing columns
+            columns = [col for col in columns if col in df.columns]
+            
+            if len(columns) == 0:
+                logger.warning("No valid columns found for plot")
+                return None
+            
+            # Analyze question for grouping hints (e.g., "distributions by species", "colored by species", "compare X across Y")
+            grouping_hint = None
+            if question:
+                question_lower = question.lower()
+                # Look for explicit color/grouping patterns first (most specific)
+                # Pattern: "colored by X", "grouped by X", "color by X"
+                color_match = re.search(r'\b(colored|grouped|color)\s+by\s+(\w+)', question_lower)
+                if color_match:
+                    grouping_hint = color_match.group(2)
+                else:
+                    # Look for general grouping patterns: "by X", "across X", "for each X", "per X"
+                    by_match = re.search(r'\b(by|across|for each|per)\s+(\w+)', question_lower)
+                    if by_match:
+                        grouping_hint = by_match.group(2)
+            
+            # Generate plot based on type
+            if plot_type == "bar":
+                return self._create_barplot(df, columns, grouping_hint)
+            elif plot_type == "line":
+                return self._create_lineplot(df, columns, grouping_hint)
+            elif plot_type == "scatter":
+                return self._create_scatterplot(df, columns, grouping_hint)
+            elif plot_type == "histogram":
+                return self._create_histogram(df, columns, grouping_hint)
+            else:
+                logger.warning(f"Unknown plot type: {plot_type}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error generating plot: {e}", exc_info=True)
+            return None
+    
+    def _infer_column_types(self, df: pd.DataFrame, columns: List[str]) -> Dict[str, str]:
+        """
+        Infer column types (numeric vs categorical).
+        
+        Args:
+            df: DataFrame
+            columns: List of column names
+        
+        Returns:
+            Dictionary mapping column names to types ('quantitative' or 'nominal')
+        """
+        types = {}
+        for col in columns:
+            if col not in df.columns:
+                continue
+            
+            # Check if column is numeric
+            if pd.api.types.is_numeric_dtype(df[col]):
+                types[col] = "quantitative"
+            else:
+                types[col] = "nominal"
+        
+        return types
+    
+    def _find_grouping_column(
+        self, 
+        df: pd.DataFrame, 
+        columns: List[str], 
+        grouping_hint: Optional[str] = None,
+        col_types: Optional[Dict[str, str]] = None
+    ) -> Optional[str]:
+        """
+        Find the appropriate categorical column to use for grouping/coloring.
+        
+        Args:
+            df: DataFrame
+            columns: List of column names to consider
+            grouping_hint: Optional hint from question parsing (e.g., "species")
+            col_types: Optional pre-computed column types dictionary
+        
+        Returns:
+            Name of the grouping column, or None if none found
+        """
+        if col_types is None:
+            col_types = self._infer_column_types(df, columns)
+        
+        categorical_cols = [col for col in columns if col_types.get(col) == "nominal"]
+        
+        if not categorical_cols:
+            return None
+        
+        # If we have a grouping hint, try to match it to a column
+        if grouping_hint:
+            hint_lower = grouping_hint.lower()
+            # Try exact match first (case-insensitive)
+            for cat_col in categorical_cols:
+                if cat_col.lower() == hint_lower:
+                    return cat_col
+            
+            # Try partial match (hint in column name or column name in hint)
+            for cat_col in categorical_cols:
+                if hint_lower in cat_col.lower() or cat_col.lower() in hint_lower:
+                    return cat_col
+        
+        # If no hint or no match, use first categorical column
+        return categorical_cols[0]
+    
+    def _create_barplot(self, df: pd.DataFrame, columns: List[str], grouping_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Create a bar plot specification with optional color encoding."""
+        try:
+            col_types = self._infer_column_types(df, columns)
+            
+            # For bar plots, typically: x = categorical, y = quantitative
+            # Or: x = categorical, y = count
+            x_col = None
+            y_col = None
+            
+            # Find categorical column for x-axis
+            for col in columns:
+                if col_types.get(col) == "nominal":
+                    x_col = col
+                    break
+            
+            # If no categorical, use first column
+            if x_col is None:
+                x_col = columns[0]
+            
+            # Find quantitative column for y-axis
+            for col in columns:
+                if col != x_col and col_types.get(col) == "quantitative":
+                    y_col = col
+                    break
+            
+            # Check for additional categorical column to use for color encoding
+            # Exclude the x-axis column from grouping consideration
+            color_columns = [col for col in columns if col != x_col]
+            group_col = self._find_grouping_column(df, color_columns, grouping_hint, col_types)
+            
+            # Build encoding dictionary
+            if y_col is None:
+                encoding = {
+                    "x": alt.X(x_col, type=col_types.get(x_col, "nominal")),
+                    "y": alt.Y("count()", title="Count")
+                }
+            else:
+                encoding = {
+                    "x": alt.X(x_col, type=col_types.get(x_col, "nominal")),
+                    "y": alt.Y(f"mean({y_col}):Q", title=f"Mean {y_col}")
+                }
+            
+            # Add color encoding if we have a grouping column (different from x-axis)
+            if group_col and group_col != x_col:
+                unique_count = df[group_col].nunique()
+                # Use color encoding for up to 10 categories
+                if unique_count <= 10:
+                    encoding["color"] = alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
+            
+            chart = alt.Chart(df).mark_bar().encode(**encoding)
+            
+            spec = chart.to_dict()
+            spec = _make_json_serializable(spec)
+            spec = _ensure_schema_version(spec)
+            return spec
+            
+        except Exception as e:
+            logger.error(f"Error creating bar plot: {e}", exc_info=True)
+            return None
+    
+    def _create_lineplot(self, df: pd.DataFrame, columns: List[str], grouping_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Create a line plot specification with optional color encoding for multiple series."""
+        try:
+            col_types = self._infer_column_types(df, columns)
+            
+            # For line plots, typically: x = time/ordinal, y = quantitative
+            x_col = None
+            y_col = None
+            
+            # Find quantitative column for y-axis
+            for col in columns:
+                if col_types.get(col) == "quantitative":
+                    y_col = col
+                    break
+            
+            # Find x-axis (prefer ordinal/numeric, but can use any)
+            for col in columns:
+                if col != y_col:
+                    x_col = col
+                    break
+            
+            if x_col is None or y_col is None:
+                # Fallback: use first two columns
+                if len(columns) >= 2:
+                    x_col = columns[0]
+                    y_col = columns[1]
+                else:
+                    logger.warning("Not enough columns for line plot")
+                    return None
+            
+            # Check for categorical column to use for color encoding (multiple series)
+            # Exclude the x and y axis columns from grouping consideration
+            color_columns = [col for col in columns if col != x_col and col != y_col]
+            group_col = self._find_grouping_column(df, color_columns, grouping_hint, col_types)
+            
+            # Build encoding dictionary
+            encoding = {
+                "x": alt.X(x_col, type=col_types.get(x_col, "quantitative")),
+                "y": alt.Y(y_col, type="quantitative")
+            }
+            
+            # Add color encoding if we have a grouping column
+            if group_col:
+                unique_count = df[group_col].nunique()
+                # Use color encoding for up to 10 categories
+                if unique_count <= 10:
+                    encoding["color"] = alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
+            
+            chart = alt.Chart(df).mark_line().encode(**encoding)
+            
+            spec = chart.to_dict()
+            spec = _make_json_serializable(spec)
+            spec = _ensure_schema_version(spec)
+            return spec
+            
+        except Exception as e:
+            logger.error(f"Error creating line plot: {e}", exc_info=True)
+            return None
+    
+    def _create_scatterplot(self, df: pd.DataFrame, columns: List[str], grouping_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Create a scatter plot specification with optional color encoding."""
+        try:
+            col_types = self._infer_column_types(df, columns)
+            
+            # For scatter plots, need two quantitative columns
+            quantitative_cols = [col for col in columns if col_types.get(col) == "quantitative"]
+            
+            if len(quantitative_cols) < 2:
+                # If not enough quantitative columns, use first two columns
+                if len(columns) >= 2:
+                    x_col = columns[0]
+                    y_col = columns[1]
+                else:
+                    logger.warning("Not enough columns for scatter plot")
+                    return None
+            else:
+                x_col = quantitative_cols[0]
+                y_col = quantitative_cols[1]
+            
+            # Check for categorical column to use for color encoding
+            group_col = self._find_grouping_column(df, columns, grouping_hint, col_types)
+            
+            # Build encoding dictionary
+            encoding = {
+                "x": alt.X(x_col, type="quantitative"),
+                "y": alt.Y(y_col, type="quantitative")
+            }
+            
+            # Add color encoding if we have a grouping column
+            if group_col:
+                unique_count = df[group_col].nunique()
+                # Use color encoding for up to 10 categories
+                if unique_count <= 10:
+                    encoding["color"] = alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
+            
+            chart = alt.Chart(df).mark_circle().encode(**encoding)
+            
+            spec = chart.to_dict()
+            spec = _make_json_serializable(spec)
+            spec = _ensure_schema_version(spec)
+            return spec
+            
+        except Exception as e:
+            logger.error(f"Error creating scatter plot: {e}", exc_info=True)
+            return None
+    
+    def _create_histogram(self, df: pd.DataFrame, columns: List[str], grouping_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Create a histogram specification with support for grouping by categorical columns."""
+        try:
+            col_types = self._infer_column_types(df, columns)
+            
+            # For histograms, need one quantitative column
+            quantitative_cols = [col for col in columns if col_types.get(col) == "quantitative"]
+            categorical_cols = [col for col in columns if col_types.get(col) == "nominal"]
+            
+            if len(quantitative_cols) == 0:
+                # If no quantitative column, use first column
+                if len(columns) > 0:
+                    col = columns[0]
+                else:
+                    logger.warning("No columns for histogram")
+                    return None
+            else:
+                col = quantitative_cols[0]
+            
+            # Determine grouping column using helper method
+            group_col = self._find_grouping_column(df, columns, grouping_hint, col_types)
+            
+            # If there's a categorical column, use it for grouping/color encoding
+            # This allows comparing distributions across categories (e.g., species)
+            if group_col:
+                # Count unique values to decide between color encoding and faceting
+                unique_count = df[group_col].nunique()
+                
+                if unique_count <= 5:
+                    # Use color encoding for small number of categories
+                    chart = alt.Chart(df).mark_bar(opacity=0.7).encode(
+                        x=alt.X(col, type="quantitative", bin=True),
+                        y=alt.Y("count()", title="Count"),
+                        color=alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
+                    )
+                else:
+                    # Use faceting for many categories
+                    chart = alt.Chart(df).mark_bar().encode(
+                        x=alt.X(col, type="quantitative", bin=True),
+                        y=alt.Y("count()", title="Count")
+                    ).facet(
+                        column=alt.Column(group_col, type="nominal", header=alt.Header(title=group_col))
+                    )
+            else:
+                # No grouping - simple histogram
+                chart = alt.Chart(df).mark_bar().encode(
+                    x=alt.X(col, type="quantitative", bin=True),
+                    y=alt.Y("count()", title="Count")
+                )
+            
+            spec = chart.to_dict()
+            spec = _make_json_serializable(spec)
+            spec = _ensure_schema_version(spec)
+            return spec
+            
+        except Exception as e:
+            logger.error(f"Error creating histogram: {e}", exc_info=True)
+            return None
+

@@ -1,17 +1,18 @@
-"""Intent classification agent."""
+"""Planner agent for creating execution plans."""
 from pydantic_ai import Agent, ModelMessage
 from typing import Optional, List
-from app.core.models import IntentClassification, DatabasePack
+from app.core.models import ExecutionPlan, DatabasePack
 
 
-class IntentAgent:
+class PlannerAgent:
     """
-    Agent for classifying user intent and determining if clarification is needed.
+    Agent for creating structured execution plans that determine intent, plot requirements,
+    and whether to use cached data or fetch new data.
     """
     
     def __init__(self, model: str, prompt_template: str, database_pack: Optional[DatabasePack] = None):
         """
-        Initialize the intent agent.
+        Initialize the planner agent.
         
         Args:
             model: The model identifier for the agent
@@ -23,22 +24,21 @@ class IntentAgent:
         self.agent = Agent(
             model,
             instructions=prompt_template,
-            output_type=IntentClassification
+            output_type=ExecutionPlan
         )
     
     async def run(self, user_message: str, message_history: Optional[List[ModelMessage]] = None):
         """
-        Run the intent classification agent.
+        Run the planner agent to create an execution plan.
         
         Args:
-            user_message: The user's message to classify
+            user_message: The user's message to plan for
             message_history: Optional message history for conversation context
             
         Returns:
-            Agent result with IntentClassification output
+            Agent result with ExecutionPlan output
         """
         if message_history:
             return await self.agent.run(user_message, message_history=message_history)
         else:
             return await self.agent.run(user_message)
-

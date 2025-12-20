@@ -159,6 +159,19 @@ async def chat(
     
     # Save to database
     intent_type = agent_response.metadata.get("intent_type") if agent_response.metadata else None
+    
+    # Extract plot_spec if present
+    plot_spec_dict = None
+    if agent_response.plot_spec:
+        plot_spec_dict = {
+            "spec": agent_response.plot_spec.spec,
+            "plot_type": agent_response.plot_spec.plot_type
+        }
+        # Also store in metadata for database storage
+        if agent_response.metadata is None:
+            agent_response.metadata = {}
+        agent_response.metadata["plot_spec"] = plot_spec_dict
+    
     db.create_chat_message(
         user_id=current_user["id"],
         message=request.message,
@@ -170,7 +183,8 @@ async def chat(
     return ChatResponse(
         response=agent_response.message,
         intent_type=intent_type,
-        metadata=agent_response.metadata
+        metadata=agent_response.metadata,
+        plot_spec=plot_spec_dict
     )
 
 
@@ -191,6 +205,11 @@ async def get_chat_history(
     
     chat_messages = []
     for msg in messages:
+        # Extract plot_spec from metadata if present
+        plot_spec = None
+        if msg.get("metadata") and isinstance(msg["metadata"], dict):
+            plot_spec = msg["metadata"].get("plot_spec")
+        
         chat_messages.append(
             ChatMessage(
                 id=msg["id"],
@@ -198,6 +217,7 @@ async def get_chat_history(
                 response=msg["response"],
                 intent_type=msg["intent_type"],
                 metadata=msg["metadata"],
+                plot_spec=plot_spec,
                 created_at=msg["created_at"]
             )
         )

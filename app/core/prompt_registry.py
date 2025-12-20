@@ -19,24 +19,19 @@ class PromptRegistry:
     
     # Fallback prompts (current hardcoded versions)
     FALLBACK_PROMPTS: Dict[str, str] = {
-        "intent-agent": (
-            "Analyze the user's question and classify the intent. "
-            "Determine if the question is clear enough to proceed or if clarification is needed.\n\n"
-            "Intent types:\n"
-            "- 'database_query': Questions requiring database access (e.g., 'How many records?', 'Show me data about X')\n"
-            "- 'general_question': General questions not requiring database (e.g., 'What is Python?', 'Explain ML')\n\n"
+        "planner-agent": (
+            "Create a structured execution plan for the user's question.\n\n"
+            "1. INTENT: 'database_query' for database questions, 'general_question' for others.\n\n"
             "{database_pack}\n"
-            "IMPORTANT: If database information is provided above, that means a database IS connected and available. "
-            "You should proceed with database queries using this connected database WITHOUT asking which dataset to use. "
-            "The user's question should be answered using the connected database shown in the database information.\n\n"
-            "Only set requires_clarification=True if:\n"
-            "- The question is truly ambiguous and cannot be answered even with the available database schema\n"
-            "- The question refers to specific information (like column values) that would require user input to narrow down\n"
-            "- The question mentions entities or concepts not present in the connected database\n\n"
-            "Do NOT ask for clarification about which dataset to use if database information is provided. "
-            "The connected database should be used automatically. "
-            "When asking for clarification, use the available database information to ask specific questions "
-            "(e.g., 'Which species are you interested in?' if the database has a species column and the question is about a specific species)."
+            "If database information is provided, use it automatically without asking which dataset to use.\n\n"
+            "2. CACHED DATA: Set use_cached_data=True when user explicitly references previous data "
+            "('plot that', 'visualize those results', 'show a chart of the data'). "
+            "Set cached_data_key='latest' when use_cached_data=True.\n\n"
+            "3. PLOT REQUIREMENTS: Set requires_plot=True for: trends (line), distributions (histogram), "
+            "comparisons (bar), relationships (scatter). Set requires_plot=False for simple counts or single values.\n\n"
+            "4. SQL QUERY: If intent_type='database_query' and use_cached_data=False, generate SQL in sql_query field.\n\n"
+            "5. CLARIFICATION: Only set requires_clarification=True if question is truly ambiguous.\n\n"
+            "Provide clear reasoning in the 'reasoning' field."
         ),
         "database-query-agent": (
             "Generate an appropriate SQL query to answer the user's database question.\n\n"
@@ -48,10 +43,19 @@ class PromptRegistry:
             "- explanation: A brief explanation of what the query does"
         ),
         "synthesizer-agent": (
-            "Synthesize a clear, natural language response for the user based on the agent output. "
-            "If the output contains database results, present them in a readable format. "
-            "If it's a general answer, present it clearly. "
-            "Make the response conversational and helpful."
+            "Synthesize a clear, concise response for the user based on the agent output.\n\n"
+            "RULES:\n"
+            "- Present the answer directly without asking unnecessary questions\n"
+            "- Do NOT show raw data, tables, or row-by-row listings\n"
+            "- If a plot was generated, mention it in present tense (e.g., 'Here is the plot...' not 'I'll generate...')\n"
+            "- Be concise and avoid verbose explanations\n"
+            "- Only ask for clarification if truly needed\n\n"
+            "PLOT DECISION (ONLY for database queries with results):\n"
+            "If the context includes database query results, consider if a plot would help. "
+            "Set should_generate_plot=True for: trends (line), distributions (histogram), comparisons (bar), relationships (scatter). "
+            "Set should_generate_plot=False for: simple counts, single values, or when visualization doesn't help. "
+            "If should_generate_plot=True, specify plot_type and optional plot_columns. "
+            "General questions should always have should_generate_plot=False."
         ),
     }
     

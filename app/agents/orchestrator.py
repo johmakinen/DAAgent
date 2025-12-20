@@ -5,13 +5,13 @@ import mlflow
 import logging
 from pydantic_ai import ModelMessage, UserPromptPart, TextPart, ModelRequest, ModelResponse, Agent
 
-from app.core.models import UserMessage, AgentResponse, IntentClassification, QueryAgentOutput
+from app.core.models import UserMessage, AgentResponse, IntentClassification, QueryAgentOutput, ExecutionPlan, DatabaseQuery
 from app.core.config import Config
 from app.core.prompt_registry import PromptRegistry
 from app.core.pack_loader import DatabasePackLoader
 from app.core.models import DatabasePack
 from app.tools.db_tool import DatabaseTool
-from app.agents.intent_agent import IntentAgent
+from app.agents.planner_agent import PlannerAgent
 from app.agents.database_query_agent import DatabaseQueryAgent
 from app.agents.synthesizer_agent import SynthesizerAgent
 from app.utils.session_manager import SessionManager
@@ -20,6 +20,7 @@ from app.utils.routing import Router
 from app.utils.clarification_handler import ClarificationHandler
 from app.utils.response_formatter import ResponseFormatter
 from app.utils.tracing import TraceManager
+from app.utils.plot_generator import PlotGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,10 @@ logger = logging.getLogger(__name__)
 class OrchestratorAgent:
     """
     Multi-agent orchestrator implementing the following flow:
-    1. IntentAgent: Classifies user intent and determines if clarification is needed
-    2. Router: Routes general questions directly to SynthesizerAgent, or database questions to DatabaseQueryAgent
-    3. DatabaseQueryAgent: Generates SQL query and executes it (if database route)
-    4. SynthesizerAgent: Takes agent output (or user question for general questions) and creates final user-facing response
+    1. PlannerAgent: Creates execution plan with intent, plot requirements, and data source decisions
+    2. Plan Execution: Uses cached data if specified, or executes DatabaseQueryAgent for new queries
+    3. DatabaseQueryAgent: Generates SQL query and executes it (if new query needed)
+    4. SynthesizerAgent: Takes agent output (or user question for general questions) and creates final user-facing response with plots if needed
     """
     
     def __init__(
@@ -64,17 +65,19 @@ class OrchestratorAgent:
         
         # Initialize prompt registry
         self.prompt_registry = PromptRegistry()
-        self.prompt_registry.initialize_all_prompts(force_update=True)
         
         # Load prompts from MLflow (or use fallback) with pack injection
-        intent_prompt = self.prompt_registry.get_prompt_template("intent-agent", database_pack)
+        planner_prompt = self.prompt_registry.get_prompt_template("planner-agent", database_pack)
         database_query_prompt = self.prompt_registry.get_prompt_template("database-query-agent", database_pack)
         synthesizer_prompt = self.prompt_registry.get_prompt_template("synthesizer-agent", database_pack)
         
+        # Initialize plot generator
+        self.plot_generator = PlotGenerator()
+        
         # Initialize agents
-        self.intent_agent = IntentAgent(model, intent_prompt, database_pack)
+        self.planner_agent = PlannerAgent(model, planner_prompt, database_pack)
         self.database_query_agent = DatabaseQueryAgent(model, database_query_prompt, self.db_tool, database_pack)
-        self.synthesizer_agent = SynthesizerAgent(model, synthesizer_prompt)
+        self.synthesizer_agent = SynthesizerAgent(model, synthesizer_prompt, plot_generator=self.plot_generator)
         
         # Summarizer agent for message history management
         summarizer_agent = Agent(
@@ -94,23 +97,23 @@ class OrchestratorAgent:
         if Config.MLFLOW_EXPERIMENT_NAME:
             mlflow.set_experiment(Config.MLFLOW_EXPERIMENT_NAME)
     
-    @mlflow.trace(name="classify_intent")
-    async def _classify_intent(
+    @mlflow.trace(name="create_plan")
+    async def _create_plan(
         self, 
         user_message: str, 
         message_history: Optional[List[ModelMessage]] = None
-    ) -> tuple[IntentClassification, Any]:
+    ) -> tuple[ExecutionPlan, Any]:
         """
-        Classify user intent and determine if clarification is needed.
+        Create an execution plan for the user's message.
         
         Args:
             user_message: The user's message
             message_history: Optional message history for context
         
         Returns:
-            Tuple of (IntentClassification, RunResult) with intent type and clarification status
+            Tuple of (ExecutionPlan, RunResult) with execution plan
         """
-        result = await self.intent_agent.run(user_message, message_history=message_history)
+        result = await self.planner_agent.run(user_message, message_history=message_history)
         return result.output, result
     
     @mlflow.trace(name="synthesize_response")
@@ -119,7 +122,8 @@ class OrchestratorAgent:
         user_message: str,
         agent_output: Optional[QueryAgentOutput],
         intent_type: str,
-        message_history: Optional[List[ModelMessage]] = None
+        message_history: Optional[List[ModelMessage]] = None,
+        execution_plan: Optional[ExecutionPlan] = None
     ) -> tuple[AgentResponse, Any]:
         """
         Synthesize final response from agent output or user question.
@@ -134,9 +138,23 @@ class OrchestratorAgent:
             Tuple of (AgentResponse, RunResult) with final user-facing message
         """
         context = self.response_formatter.format_context_for_synthesizer(
-            user_message, agent_output, intent_type
+            user_message, agent_output, intent_type, execution_plan
         )
-        result = await self.synthesizer_agent.run(context, message_history=message_history)
+        
+        # Extract database data for plot generation (only for database queries with results)
+        database_data = None
+        if intent_type == "database_query" and agent_output is not None:
+            if (agent_output.query_result.success and 
+                agent_output.query_result.data is not None and 
+                len(agent_output.query_result.data) > 0):
+                database_data = agent_output.query_result.data
+        
+        result = await self.synthesizer_agent.run(
+            context, 
+            message_history=message_history,
+            database_data=database_data,
+            user_question=user_message
+        )
         return result.output, result
     
     @mlflow.trace(name="chat")
@@ -150,10 +168,11 @@ class OrchestratorAgent:
         
         Flow:
         1. Check for pending clarification and handle accordingly
-        2. IntentAgent classifies intent and checks if clarification needed
+        2. PlannerAgent creates execution plan with intent, plot requirements, and data source decisions
         3. If clarification needed, store state and return clarification question
-        4. Router directs general questions to SynthesizerAgent, or database questions to DatabaseQueryAgent
-        5. SynthesizerAgent creates final user-facing response
+        4. Execute plan: use cached data if specified, or execute DatabaseQueryAgent for new queries
+        5. Store new query results in session cache
+        6. SynthesizerAgent creates final user-facing response with plots if needed
         
         Args:
             user_input: The user's message as a UserMessage model
@@ -182,39 +201,97 @@ class OrchestratorAgent:
         
         if is_clarification_response:
             # User is responding to clarification
-            user_message_content, intent = self.clarification_handler.handle_clarification_response(
+            user_message_content, intent_classification = self.clarification_handler.handle_clarification_response(
                 user_input, session_state
             )
-            self.trace_manager.tag_intent_type(intent.intent_type)
+            # Convert IntentClassification to ExecutionPlan for consistency
+            plan = ExecutionPlan(
+                intent_type=intent_classification.intent_type,
+                requires_clarification=intent_classification.requires_clarification,
+                clarification_question=intent_classification.clarification_question,
+                reasoning=intent_classification.reasoning,
+                requires_plot=False,
+                use_cached_data=False,
+                explanation="Clarification response"
+            )
+            self.trace_manager.tag_intent_type(plan.intent_type)
         else:
-            # Normal flow - classify intent
-            intent, intent_result = await self._classify_intent(
+            # Normal flow - create execution plan
+            plan, plan_result = await self._create_plan(
                 user_input.content, 
                 message_history=current_message_history
             )
             user_message_content = user_input.content
-            self.trace_manager.tag_intent_type(intent.intent_type)
+            self.trace_manager.tag_intent_type(plan.intent_type)
         
         # Check if clarification is needed
-        if intent.requires_clarification:
+        if plan.requires_clarification:
+            # Convert ExecutionPlan to IntentClassification for compatibility with clarification handler
+            intent_classification = IntentClassification(
+                intent_type=plan.intent_type,
+                requires_clarification=plan.requires_clarification,
+                clarification_question=plan.clarification_question,
+                reasoning=plan.reasoning
+            )
             return self.clarification_handler.handle_clarification_request(
-                user_input, intent, session_id, session_state
+                user_input, intent_classification, session_id, session_state
             )
         
-        # Route to appropriate agent based on intent
+        # Execute plan: get data (cached or new query)
         agent_output = None
-        if intent.intent_type == "database_query":
-            agent_output, _ = await self.router.route_to_database_query(
-                user_message_content,
-                message_history=current_message_history
-            )
+        if plan.intent_type == "database_query":
+            if plan.use_cached_data:
+                # Retrieve cached data
+                if plan.cached_data_key:
+                    agent_output = self.session_manager.get_query_result(session_id, plan.cached_data_key)
+                else:
+                    # Default to latest if no key specified
+                    agent_output = self.session_manager.get_latest_query_result(session_id)
+                
+                if agent_output is None:
+                    logger.warning(f"No cached data found for session {session_id}, falling back to new query")
+                    # Fall back to new query if cached data not found
+                    plan.use_cached_data = False
+            
+            if not plan.use_cached_data:
+                # Execute new database query
+                if plan.sql_query:
+                    # Use SQL from plan if provided
+                    db_query = DatabaseQuery(query=plan.sql_query)
+                    query_result = self.db_tool.execute_query(db_query)
+                    agent_output = QueryAgentOutput(
+                        sql_query=plan.sql_query,
+                        query_result=query_result,
+                        explanation=plan.explanation
+                    )
+                else:
+                    # Let DatabaseQueryAgent generate and execute query
+                    agent_output, _ = await self.router.route_to_database_query(
+                        user_message_content,
+                        message_history=current_message_history
+                    )
+                
+                # Store query result in cache
+                if agent_output and agent_output.query_result.success:
+                    import hashlib
+                    import time
+                    # Create a key from query hash and timestamp
+                    query_hash = hashlib.md5(agent_output.sql_query.encode()).hexdigest()[:8]
+                    timestamp = str(int(time.time()))
+                    cache_key = f"{query_hash}_{timestamp}"
+                    self.session_manager.store_query_result(session_id, cache_key, agent_output)
+                    # Also store as 'latest' for easy access
+                    self.session_manager.store_query_result(session_id, "latest", agent_output)
+                    # Clear old results (keep last 5)
+                    self.session_manager.clear_old_results(session_id, keep_last_n=5)
         
-        # Synthesize final response
+        # Synthesize final response (use plan's plot requirements if available)
         response, _ = await self._synthesize_response(
             user_message_content,
             agent_output,
-            intent.intent_type,
-            message_history=current_message_history
+            plan.intent_type,
+            message_history=current_message_history,
+            execution_plan=plan
         )
         
         # Update message history
@@ -227,8 +304,8 @@ class OrchestratorAgent:
         # Add metadata
         if response.metadata is None:
             response.metadata = {}
-        response.metadata["intent_type"] = intent.intent_type
-        response.metadata["requires_database"] = (intent.intent_type == "database_query")
+        response.metadata["intent_type"] = plan.intent_type
+        response.metadata["requires_database"] = (plan.intent_type == "database_query")
         response.metadata["session_id"] = session_id
         
         return response
