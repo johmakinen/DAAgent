@@ -35,28 +35,15 @@ load_dotenv()
 
 app = FastAPI(title="Agent app API", version="1.0.0")
 
-# CORS configuration
-# Allow all origins in development, restrict in production
-# Default includes localhost and common local network IPs
-default_origins = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-    "http://192.168.0.107:3000",  # Common local network IP
-    "http://192.168.1.107:3000",  # Alternative common local network IP
-]
-
-cors_origins_str = os.getenv("CORS_ORIGINS", ",".join(default_origins))
-cors_origins = [origin.strip() for origin in cors_origins_str.split(",") if origin.strip()]
-
+# CORS configuration - Simplified for development
+# Allow all origins for browser access during development
+# Note: When allow_credentials=True, we can't use ["*"], so we use a regex pattern
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origin_regex=r".*",  # Allow all origins (regex pattern)
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 # Initialize database and ensure admin user exists

@@ -1,19 +1,12 @@
-from dotenv import load_dotenv
+"""Multi-agent orchestrator coordinating the agent pipeline."""
 from pathlib import Path
-from typing import Literal, Dict, Any, Optional, List
-from datetime import datetime
+from typing import Optional, List, Any
 import mlflow
 import logging
-from pydantic_ai import ModelMessage, UserPromptPart, TextPart, ModelRequest, ModelResponse, Agent, SystemPromptPart
+from pydantic_ai import ModelMessage, UserPromptPart, TextPart, ModelRequest, ModelResponse, Agent
 
-from app.core.models import (
-    UserMessage, 
-    AgentResponse, 
-    IntentClassification,
-    QueryAgentOutput,
-)
-
-logger = logging.getLogger(__name__)
+from app.core.models import UserMessage, AgentResponse, IntentClassification, QueryAgentOutput
+from app.core.config import Config
 from app.core.prompt_registry import PromptRegistry
 from app.core.pack_loader import DatabasePackLoader
 from app.core.models import DatabasePack
@@ -21,10 +14,14 @@ from app.tools.db_tool import DatabaseTool
 from app.agents.intent_agent import IntentAgent
 from app.agents.database_query_agent import DatabaseQueryAgent
 from app.agents.synthesizer_agent import SynthesizerAgent
-from app.agents.session_manager import SessionManager
-from app.agents.message_history import MessageHistoryManager
+from app.utils.session_manager import SessionManager
+from app.utils.message_history import MessageHistoryManager
+from app.utils.routing import Router
+from app.utils.clarification_handler import ClarificationHandler
+from app.utils.response_formatter import ResponseFormatter
+from app.utils.tracing import TraceManager
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 class OrchestratorAgent:
@@ -38,22 +35,24 @@ class OrchestratorAgent:
     
     def __init__(
         self,
-        model: str = 'azure:gpt-5-nano',
+        model: str = None,
         instructions: str = 'Be helpful and concise.'
     ):
         """
         Initialize all agents in the orchestration pipeline.
         
         Args:
-            model: The model identifier for all agents
+            model: The model identifier for all agents (defaults to Config.DEFAULT_MODEL)
             instructions: Base system instructions (currently unused, kept for compatibility)
         """
+        if model is None:
+            model = Config.DEFAULT_MODEL
+        
         self.db_tool = DatabaseTool()
         
         # Load database pack
         database_pack: Optional[DatabasePack] = None
         try:
-            # Try to load the iris database pack
             pack_path = Path(__file__).parent.parent / "packs" / "iris_database.yaml"
             if pack_path.exists():
                 database_pack = DatabasePackLoader.load_pack(str(pack_path))
@@ -65,9 +64,6 @@ class OrchestratorAgent:
         
         # Initialize prompt registry
         self.prompt_registry = PromptRegistry()
-        
-        # Force update all prompts to ensure latest versions from codebase are used
-        # This ensures all agents have the most up-to-date prompts, including any fixes
         self.prompt_registry.initialize_all_prompts(force_update=True)
         
         # Load prompts from MLflow (or use fallback) with pack injection
@@ -75,29 +71,37 @@ class OrchestratorAgent:
         database_query_prompt = self.prompt_registry.get_prompt_template("database-query-agent", database_pack)
         synthesizer_prompt = self.prompt_registry.get_prompt_template("synthesizer-agent", database_pack)
         
-        # Step 1: Intent Agent - Classifies intent and determines if clarification needed
+        # Initialize agents
         self.intent_agent = IntentAgent(model, intent_prompt, database_pack)
-        
-        # Step 2: Database Query Agent - Generates SQL and executes queries
         self.database_query_agent = DatabaseQueryAgent(model, database_query_prompt, self.db_tool, database_pack)
-        
-        # Step 3: Synthesizer Agent - Creates final user-facing response (handles both general questions and database results)
         self.synthesizer_agent = SynthesizerAgent(model, synthesizer_prompt)
         
-        # Summarizer agent for message history management (use cheaper model)
+        # Summarizer agent for message history management
         summarizer_agent = Agent(
-            'azure:gpt-5-mini',
+            Config.SUMMARIZER_MODEL,
             instructions="Summarize this conversation, omitting small talk and unrelated topics. Focus on the technical discussion and next steps."
         )
         
-        # Initialize session and message history managers
+        # Initialize utilities
         self.session_manager = SessionManager()
         self.message_history_manager = MessageHistoryManager(summarizer_agent)
+        self.router = Router(self.database_query_agent)
+        self.clarification_handler = ClarificationHandler(self.message_history_manager)
+        self.response_formatter = ResponseFormatter()
+        self.trace_manager = TraceManager()
+        
+        # Set MLflow experiment if configured
+        if Config.MLFLOW_EXPERIMENT_NAME:
+            mlflow.set_experiment(Config.MLFLOW_EXPERIMENT_NAME)
     
     @mlflow.trace(name="classify_intent")
-    async def _classify_intent(self, user_message: str, message_history: Optional[List[ModelMessage]] = None) -> tuple[IntentClassification, Any]:
+    async def _classify_intent(
+        self, 
+        user_message: str, 
+        message_history: Optional[List[ModelMessage]] = None
+    ) -> tuple[IntentClassification, Any]:
         """
-        Step 1: Classify user intent and determine if clarification is needed.
+        Classify user intent and determine if clarification is needed.
         
         Args:
             user_message: The user's message
@@ -109,74 +113,38 @@ class OrchestratorAgent:
         result = await self.intent_agent.run(user_message, message_history=message_history)
         return result.output, result
     
-    @mlflow.trace(name="route_to_database_query")
-    async def _route_to_database_query(self, user_message: str, message_history: Optional[List[ModelMessage]] = None) -> tuple[QueryAgentOutput, Any]:
-        """
-        Step 2b: Route to database query agent to generate and execute SQL.
-        
-        Args:
-            user_message: The user's message
-            message_history: Optional message history for context
-        
-        Returns:
-            Tuple of (QueryAgentOutput, RunResult) with SQL query and results
-        """
-        result = await self.database_query_agent.run(user_message, message_history=message_history)
-        return result.output, result
-    
     @mlflow.trace(name="synthesize_response")
     async def _synthesize_response(
         self, 
         user_message: str,
         agent_output: Optional[QueryAgentOutput],
-        intent_type: Literal["database_query", "general_question"],
+        intent_type: str,
         message_history: Optional[List[ModelMessage]] = None
     ) -> tuple[AgentResponse, Any]:
         """
-        Step 3: Synthesize final response from agent output or user question.
+        Synthesize final response from agent output or user question.
         
         Args:
             user_message: Original user question
             agent_output: Output from database query agent (None for general questions)
             intent_type: Type of intent that was processed
+            message_history: Optional message history for context
         
         Returns:
             Tuple of (AgentResponse, RunResult) with final user-facing message
         """
-        # Format context for synthesizer
-        if intent_type == "database_query":
-            if agent_output is None:
-                raise ValueError("agent_output must be provided for database_query intent")
-            query_output: QueryAgentOutput = agent_output
-            context = (
-                f"User question: {user_message}\n\n"
-                f"SQL Query executed: {query_output.sql_query}\n"
-                f"Query explanation: {query_output.explanation}\n"
-                f"Query success: {query_output.query_result.success}\n"
-            )
-            if query_output.query_result.success:
-                if query_output.query_result.row_count == 0:
-                    context += "Query returned 0 rows."
-                else:
-                    # Format first few rows for context
-                    rows_str = []
-                    for i, row in enumerate(query_output.query_result.data[:5], 1):
-                        row_str = ", ".join([f"{k}: {v}" for k, v in row.items()])
-                        rows_str.append(f"Row {i}: {row_str}")
-                    context += f"Query returned {query_output.query_result.row_count} row(s):\n" + "\n".join(rows_str)
-                    if query_output.query_result.row_count > 5:
-                        context += f"\n... and {query_output.query_result.row_count - 5} more rows"
-            else:
-                context += f"Query error: {query_output.query_result.error}"
-        else:
-            # For general questions, pass the user question directly to synthesizer
-            context = f"User question: {user_message}"
-        
+        context = self.response_formatter.format_context_for_synthesizer(
+            user_message, agent_output, intent_type
+        )
         result = await self.synthesizer_agent.run(context, message_history=message_history)
         return result.output, result
     
     @mlflow.trace(name="chat")
-    async def chat(self, user_input: UserMessage, message_history: Optional[List[ModelMessage]] = None) -> AgentResponse:
+    async def chat(
+        self, 
+        user_input: UserMessage, 
+        message_history: Optional[List[ModelMessage]] = None
+    ) -> AgentResponse:
         """
         Main chat interface implementing the full orchestration flow.
         
@@ -203,115 +171,56 @@ class OrchestratorAgent:
         current_message_history = await self.message_history_manager.summarize_if_needed(current_message_history)
         session_state["message_history"] = current_message_history
         
-        # Tag MLflow trace with metadata (for admin/debugging)
-        try:
-            tags = {
-                "mlflow.trace.session": session_id,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            if user_input.username:
-                tags["username"] = user_input.username
-            mlflow.update_current_trace(tags=tags)
-        except Exception as e:
-            logger.debug(f"Failed to tag MLflow trace: {e}")
+        # Tag MLflow trace with metadata
+        self.trace_manager.tag_trace(
+            session_id=session_id,
+            username=user_input.username
+        )
         
-        # Handle pending clarification
-        pending_clarification = session_state.get("pending_clarification")
-        is_clarification_response = pending_clarification is not None
+        # Handle clarification flow
+        is_clarification_response = self.clarification_handler.is_clarification_response(session_state)
         
-        intent_result = None
         if is_clarification_response:
             # User is responding to clarification
-            original_message = pending_clarification["original_message"]
-            stored_intent = pending_clarification["intent"]
-            
-            # Add user's clarification response to message history
-            clarification_response_msg = ModelRequest(parts=[UserPromptPart(content=user_input.content)])
-            self.message_history_manager.add_message_to_history(session_state, clarification_response_msg, None)
-            
-            # Combine messages for context - include original question in the message
-            combined_message = f"{original_message}\n\n[Clarification response]: {user_input.content}"
-            
-            # Use stored intent instead of re-classifying
-            intent = stored_intent
-            
-            # Add intent_type to MLflow trace
-            try:
-                mlflow.update_current_trace(tags={"intent_type": intent.intent_type})
-            except Exception as e:
-                logger.debug(f"Failed to tag MLflow trace with intent_type: {e}")
-            
-            # Clear pending clarification
-            session_state["pending_clarification"] = None
-            
-            # Use combined message for processing
-            user_message_content = combined_message
+            user_message_content, intent = self.clarification_handler.handle_clarification_response(
+                user_input, session_state
+            )
+            self.trace_manager.tag_intent_type(intent.intent_type)
         else:
             # Normal flow - classify intent
-            # Step 1: Classify intent
             intent, intent_result = await self._classify_intent(
                 user_input.content, 
                 message_history=current_message_history
             )
             user_message_content = user_input.content
-            
-            # Add intent_type to MLflow trace
-            try:
-                mlflow.update_current_trace(tags={"intent_type": intent.intent_type})
-            except Exception as e:
-                logger.debug(f"Failed to tag MLflow trace with intent_type: {e}")
+            self.trace_manager.tag_intent_type(intent.intent_type)
         
-        # Step 2: Check if clarification is needed
+        # Check if clarification is needed
         if intent.requires_clarification:
-            # Store original message and intent for when user responds
-            session_state["pending_clarification"] = {
-                "original_message": user_input.content,
-                "intent": intent
-            }
-            
-            clarification_message = intent.clarification_question or "Could you please clarify your question?"
-            
-            # Update message history with user message and clarification response
-            user_msg = ModelRequest(parts=[UserPromptPart(content=user_input.content)])
-            assistant_msg = ModelResponse(parts=[TextPart(content=clarification_message)])
-            self.message_history_manager.add_message_to_history(session_state, user_msg, assistant_msg)
-            
-            response = AgentResponse(
-                message=clarification_message,
-                requires_followup=True,
-                metadata={"intent_type": intent.intent_type, "requires_clarification": True, "session_id": session_id}
+            return self.clarification_handler.handle_clarification_request(
+                user_input, intent, session_id, session_state
             )
-            
-            return response
         
-        # Step 3: Route to appropriate agent based on intent
-        agent_result = None
+        # Route to appropriate agent based on intent
         agent_output = None
         if intent.intent_type == "database_query":
-            agent_output, agent_result = await self._route_to_database_query(
+            agent_output, _ = await self.router.route_to_database_query(
                 user_message_content,
                 message_history=current_message_history
             )
         
-        # Step 4: Synthesize final response
-        # For general questions, agent_output is None and synthesizer handles the question directly
-        # For database queries, agent_output contains the query results
-        response, synthesizer_result = await self._synthesize_response(
+        # Synthesize final response
+        response, _ = await self._synthesize_response(
             user_message_content,
             agent_output,
             intent.intent_type,
             message_history=current_message_history
         )
         
-        # Update message history with this exchange
-        # Note: For clarification responses, the user's clarification response is already in history
-        # For normal flow, we need to add the user message
-        user_msg = None
-        if not is_clarification_response:
-            # Normal flow - add user message
-            user_msg = ModelRequest(parts=[UserPromptPart(content=user_input.content)])
-        
-        # Always add assistant response
+        # Update message history
+        user_msg = None if is_clarification_response else ModelRequest(
+            parts=[UserPromptPart(content=user_input.content)]
+        )
         assistant_msg = ModelResponse(parts=[TextPart(content=response.message)])
         self.message_history_manager.add_message_to_history(session_state, user_msg, assistant_msg)
         
