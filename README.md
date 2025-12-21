@@ -10,47 +10,47 @@ The system uses a multi-agent orchestration pattern where specialized agents wor
 
 ```mermaid
 flowchart TD
-    Start([User sends message via API]) --> APIEndpoint[/api/chat endpoint]
+    Start([User sends message via API]) --> APIEndpoint["/api/chat endpoint"]
     APIEndpoint --> Orchestrator[OrchestratorAgent]
     
-    Orchestrator --> SessionMgr[SessionManager<br/>Get/Create Session]
-    SessionMgr --> MsgHistory[MessageHistoryManager<br/>Summarize if needed]
-    MsgHistory --> ClarCheck{Is clarification<br/>response?}
+    Orchestrator --> SessionMgr["SessionManager: Get/Create Session"]
+    SessionMgr --> MsgHistory["MessageHistoryManager: Summarize if needed"]
+    MsgHistory --> ClarCheck{"Is clarification response?"}
     
-    ClarCheck -->|Yes| ClarHandler[ClarificationHandler<br/>Handle response]
-    ClarCheck -->|No| Planner[PlannerAgent<br/>Create execution plan]
+    ClarCheck -->|Yes| ClarHandler["ClarificationHandler: Handle response"]
+    ClarCheck -->|No| Planner["PlannerAgent: Create execution plan"]
     
     ClarHandler --> Planner
     
-    Planner --> PlanCheck{Plan requires<br/>clarification?}
-    PlanCheck -->|Yes| ClarRequest[ClarificationHandler<br/>Store state & return question]
-    PlanCheck -->|No| IntentCheck{Intent type?}
+    Planner --> PlanCheck{"Plan requires clarification?"}
+    PlanCheck -->|Yes| ClarRequest["ClarificationHandler: Store state and return question"]
+    PlanCheck -->|No| IntentCheck{"Intent type?"}
     
-    ClarRequest --> EndClar([Return clarification<br/>to user])
+    ClarRequest --> EndClar([Return clarification to user])
     
-    IntentCheck -->|general_question| Synthesizer[SynthesizerAgent<br/>Generate response]
-    IntentCheck -->|database_query| CacheCheck{Use cached<br/>data?}
+    IntentCheck -->|general_question| Synthesizer["SynthesizerAgent: Generate response"]
+    IntentCheck -->|database_query| CacheCheck{"Use cached data?"}
     
-    CacheCheck -->|Yes| GetCache[SessionManager<br/>Retrieve cached result]
-    CacheCheck -->|No| SQLCheck{SQL in plan?}
+    CacheCheck -->|Yes| GetCache["SessionManager: Retrieve cached result"]
+    CacheCheck -->|No| SQLCheck{"SQL in plan?"}
     
-    SQLCheck -->|Yes| DBTool[DatabaseTool<br/>Execute SQL directly]
-    SQLCheck -->|No| DBQueryAgent[DatabaseQueryAgent<br/>Generate & execute SQL]
+    SQLCheck -->|Yes| DBTool["DatabaseTool: Execute SQL directly"]
+    SQLCheck -->|No| DBQueryAgent["DatabaseQueryAgent: Generate and execute SQL"]
     
     DBQueryAgent --> DBTool
-    DBTool --> StoreResult[SessionManager<br/>Store query result]
-    GetCache --> FormatContext[ResponseFormatter<br/>Format context]
+    DBTool --> StoreResult["SessionManager: Store query result"]
+    GetCache --> FormatContext["ResponseFormatter: Format context"]
     StoreResult --> FormatContext
     
     FormatContext --> Synthesizer
     
-    Synthesizer --> PlotCheck{Plot required?}
-    PlotCheck -->|Yes| PlotGen[PlotGenerator<br/>Generate Vega-Lite spec]
-    PlotCheck -->|No| UpdateHistory[MessageHistoryManager<br/>Update history]
+    Synthesizer --> PlotCheck{"Plot required?"}
+    PlotCheck -->|Yes| PlotGen["PlotGenerator: Generate Vega-Lite spec"]
+    PlotCheck -->|No| UpdateHistory["MessageHistoryManager: Update history"]
     
     PlotGen --> UpdateHistory
-    UpdateHistory --> SaveDB[(DatabaseManager<br/>Save to database)]
-    SaveDB --> End([Return response<br/>to user])
+    UpdateHistory --> SaveDB[("DatabaseManager: Save to database")]
+    SaveDB --> End([Return response to user])
     
     style Orchestrator fill:#e1f5ff
     style Planner fill:#fff4e1
