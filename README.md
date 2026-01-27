@@ -45,9 +45,10 @@ flowchart TD
     FormatContext --> Synthesizer
     
     Synthesizer --> PlotCheck{"Plot required?"}
-    PlotCheck -->|Yes| PlotGen["PlotGenerator: Generate Vega-Lite spec"]
+    PlotCheck -->|Yes| PlotPlan["PlotPlanningAgent: Determine plot config"]
     PlotCheck -->|No| UpdateHistory["MessageHistoryManager: Update history"]
     
+    PlotPlan --> PlotGen["PlotGenerator: Generate Vega-Lite spec"]
     PlotGen --> UpdateHistory
     UpdateHistory --> SaveDB[("DatabaseManager: Save to database")]
     SaveDB --> End([Return response to user])
@@ -56,6 +57,7 @@ flowchart TD
     style Planner fill:#fff4e1
     style DBQueryAgent fill:#fff4e1
     style Synthesizer fill:#fff4e1
+    style PlotPlan fill:#fff4e1
     style DBTool fill:#e8f5e9
     style PlotGen fill:#f3e5f5
 ```
@@ -137,6 +139,27 @@ flowchart TD
 **Key Responsibilities**:
 - Summarizes old messages while preserving recent context
 - Maintains conversation continuity without losing important context
+
+#### PlotPlanningAgent
+**Location**: `app/agents/plot_planning_agent.py`
+
+**Purpose**: Analyzes user questions and data structure to determine optimal plot configuration, including grouping columns for color encoding.
+
+**When Used**: Automatically by PlotGenerator when generating plots, if the agent is provided.
+
+**Key Responsibilities**:
+- Analyzes user questions semantically to understand plot requirements
+- Determines which columns to use for x-axis, y-axis, and grouping
+- Identifies when grouping/color encoding is needed (e.g., "for the three species" → grouping_column="species")
+- Matches column names from questions to available data columns
+- Replaces previous regex-based grouping detection with intelligent LLM-based analysis
+
+**Output**: `PlotConfig` model with plot_type, x_column, y_column, grouping_column, columns, and reasoning.
+
+**Benefits**: 
+- Handles natural language variations that regex patterns miss
+- Understands context and intent for better plot configuration
+- More flexible and maintainable than pattern matching
 
 ### Tools
 
@@ -242,8 +265,15 @@ flowchart TD
 **Key Responsibilities**:
 - Generates Vega-Lite JSON specifications
 - Supports multiple plot types: bar, line, scatter, histogram
-- Infers appropriate plot configurations from data
+- Uses PlotPlanningAgent (if provided) to intelligently determine plot configuration
+- Falls back to regex-based grouping detection if agent not available (backward compatibility)
 - Handles data type detection and column selection
+
+**Integration**: 
+- Accepts optional `PlotPlanningAgent` in constructor
+- Calls agent to analyze user question and determine grouping columns
+- Uses agent's `PlotConfig` output to create properly color-coded plots
+- Maintains backward compatibility when agent is not provided
 
 **Output**: Vega-Lite JSON specification dictionary.
 
@@ -340,9 +370,15 @@ flowchart TD
      - Coordinates with `PlotGenerator` if plot required
 
 9. **Plot Generation** (if required)
+   - `PlotPlanningAgent` analyzes user question and data structure:
+     - Determines which columns to use
+     - Identifies if grouping/color encoding is needed
+     - Matches column names from question to data
    - `PlotGenerator` creates Vega-Lite specification:
+     - Uses `PlotConfig` from PlotPlanningAgent (if available)
      - Converts data to DataFrame
      - Generates appropriate plot type (bar, line, scatter, histogram)
+     - Applies color encoding based on grouping column
      - Returns JSON specification
 
 10. **History Update**
@@ -371,6 +407,7 @@ flowchart TD
 - **DatabaseQuery**: SQL query with optional parameters
 - **DatabaseResult**: Query execution result with success status, data, error information
 - **PlotSpec**: Vega-Lite specification with plot type
+- **PlotConfig**: Plot configuration determined by PlotPlanningAgent with columns, grouping, and reasoning
 
 ## Configuration
 

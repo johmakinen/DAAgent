@@ -5,6 +5,7 @@ import json
 from typing import Optional, List, Dict, Any
 import pandas as pd
 import altair as alt
+from app.core.models import PlotConfig
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +60,16 @@ def _ensure_schema_version(spec: Dict[str, Any], target_version: str = "5.17.0")
 class PlotGenerator:
     """Utility class for generating Vega-Lite plot specifications using Altair."""
     
-    def __init__(self):
-        """Initialize the plot generator."""
-        pass
+    def __init__(self, plot_planning_agent: Optional[Any] = None):
+        """
+        Initialize the plot generator.
+        
+        Args:
+            plot_planning_agent: Optional PlotPlanningAgent instance for intelligent plot configuration
+        """
+        self.plot_planning_agent = plot_planning_agent
     
-    def generate_plot(
+    async def generate_plot(
         self,
         data: List[Dict[str, Any]],
         plot_type: str,
@@ -101,30 +107,64 @@ class PlotGenerator:
                 logger.warning("No valid columns found for plot")
                 return None
             
-            # Analyze question for grouping hints (e.g., "distributions by species", "colored by species", "compare X across Y")
-            grouping_hint = None
-            if question:
-                question_lower = question.lower()
-                # Look for explicit color/grouping patterns first (most specific)
-                # Pattern: "colored by X", "grouped by X", "color by X"
-                color_match = re.search(r'\b(colored|grouped|color)\s+by\s+(\w+)', question_lower)
-                if color_match:
-                    grouping_hint = color_match.group(2)
-                else:
-                    # Look for general grouping patterns: "by X", "across X", "for each X", "per X"
-                    by_match = re.search(r'\b(by|across|for each|per)\s+(\w+)', question_lower)
-                    if by_match:
-                        grouping_hint = by_match.group(2)
+            # Infer column types
+            col_types = self._infer_column_types(df, columns)
+            
+            # Use PlotPlanningAgent if available, otherwise fall back to regex-based approach
+            plot_config = None
+            if self.plot_planning_agent is not None:
+                try:
+                    # Call the agent to get plot configuration
+                    agent_result = await self.plot_planning_agent.run(
+                        question=question,
+                        available_columns=columns,
+                        column_types=col_types
+                    )
+                    plot_config = agent_result.output
+                    logger.debug(f"PlotPlanningAgent determined: {plot_config.reasoning}")
+                    
+                    # Use columns from config if provided, otherwise use original
+                    if plot_config.columns:
+                        # Filter to only existing columns
+                        config_columns = [col for col in plot_config.columns if col in df.columns]
+                        if config_columns:
+                            columns = config_columns
+                except Exception as e:
+                    logger.warning(f"PlotPlanningAgent failed, falling back to regex: {e}")
+                    plot_config = None
+            
+            # Fallback to regex-based grouping hint if agent not available or failed
+            grouping_column = None
+            if plot_config and plot_config.grouping_column:
+                grouping_column = plot_config.grouping_column
+            else:
+                # Legacy regex-based approach for backward compatibility
+                grouping_hint = None
+                if question:
+                    question_lower = question.lower()
+                    # Look for explicit color/grouping patterns first (most specific)
+                    # Pattern: "colored by X", "grouped by X", "color by X"
+                    color_match = re.search(r'\b(colored|grouped|color)\s+by\s+(\w+)', question_lower)
+                    if color_match:
+                        grouping_hint = color_match.group(2)
+                    else:
+                        # Look for general grouping patterns: "by X", "across X", "for each X", "per X"
+                        by_match = re.search(r'\b(by|across|for each|per)\s+(\w+)', question_lower)
+                        if by_match:
+                            grouping_hint = by_match.group(2)
+                
+                if grouping_hint:
+                    grouping_column = self._find_grouping_column(df, columns, grouping_hint, col_types)
             
             # Generate plot based on type
             if plot_type == "bar":
-                return self._create_barplot(df, columns, grouping_hint)
+                return self._create_barplot(df, columns, grouping_column, plot_config)
             elif plot_type == "line":
-                return self._create_lineplot(df, columns, grouping_hint)
+                return self._create_lineplot(df, columns, grouping_column, plot_config)
             elif plot_type == "scatter":
-                return self._create_scatterplot(df, columns, grouping_hint)
+                return self._create_scatterplot(df, columns, grouping_column, plot_config)
             elif plot_type == "histogram":
-                return self._create_histogram(df, columns, grouping_hint)
+                return self._create_histogram(df, columns, grouping_column, plot_config)
             else:
                 logger.warning(f"Unknown plot type: {plot_type}")
                 return None
@@ -200,36 +240,38 @@ class PlotGenerator:
         # If no hint or no match, use first categorical column
         return categorical_cols[0]
     
-    def _create_barplot(self, df: pd.DataFrame, columns: List[str], grouping_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def _create_barplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[Dict[str, Any]]:
         """Create a bar plot specification with optional color encoding."""
         try:
             col_types = self._infer_column_types(df, columns)
             
-            # For bar plots, typically: x = categorical, y = quantitative
-            # Or: x = categorical, y = count
-            x_col = None
-            y_col = None
+            # Use plot_config if available, otherwise infer
+            if plot_config and plot_config.x_column:
+                x_col = plot_config.x_column
+            else:
+                # Find categorical column for x-axis
+                x_col = None
+                for col in columns:
+                    if col_types.get(col) == "nominal":
+                        x_col = col
+                        break
+                
+                # If no categorical, use first column
+                if x_col is None:
+                    x_col = columns[0]
             
-            # Find categorical column for x-axis
-            for col in columns:
-                if col_types.get(col) == "nominal":
-                    x_col = col
-                    break
+            if plot_config and plot_config.y_column:
+                y_col = plot_config.y_column
+            else:
+                # Find quantitative column for y-axis
+                y_col = None
+                for col in columns:
+                    if col != x_col and col_types.get(col) == "quantitative":
+                        y_col = col
+                        break
             
-            # If no categorical, use first column
-            if x_col is None:
-                x_col = columns[0]
-            
-            # Find quantitative column for y-axis
-            for col in columns:
-                if col != x_col and col_types.get(col) == "quantitative":
-                    y_col = col
-                    break
-            
-            # Check for additional categorical column to use for color encoding
-            # Exclude the x-axis column from grouping consideration
-            color_columns = [col for col in columns if col != x_col]
-            group_col = self._find_grouping_column(df, color_columns, grouping_hint, col_types)
+            # Use grouping_column from parameter (set by generate_plot)
+            group_col = grouping_column
             
             # Build encoding dictionary
             if y_col is None:
@@ -261,26 +303,33 @@ class PlotGenerator:
             logger.error(f"Error creating bar plot: {e}", exc_info=True)
             return None
     
-    def _create_lineplot(self, df: pd.DataFrame, columns: List[str], grouping_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def _create_lineplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[Dict[str, Any]]:
         """Create a line plot specification with optional color encoding for multiple series."""
         try:
             col_types = self._infer_column_types(df, columns)
             
-            # For line plots, typically: x = time/ordinal, y = quantitative
-            x_col = None
-            y_col = None
+            # Use plot_config if available, otherwise infer
+            if plot_config and plot_config.x_column:
+                x_col = plot_config.x_column
+            else:
+                x_col = None
             
-            # Find quantitative column for y-axis
-            for col in columns:
-                if col_types.get(col) == "quantitative":
-                    y_col = col
-                    break
+            if plot_config and plot_config.y_column:
+                y_col = plot_config.y_column
+            else:
+                # Find quantitative column for y-axis
+                y_col = None
+                for col in columns:
+                    if col_types.get(col) == "quantitative":
+                        y_col = col
+                        break
             
-            # Find x-axis (prefer ordinal/numeric, but can use any)
-            for col in columns:
-                if col != y_col:
-                    x_col = col
-                    break
+            # If not from config, find x-axis (prefer ordinal/numeric, but can use any)
+            if x_col is None:
+                for col in columns:
+                    if col != y_col:
+                        x_col = col
+                        break
             
             if x_col is None or y_col is None:
                 # Fallback: use first two columns
@@ -291,10 +340,8 @@ class PlotGenerator:
                     logger.warning("Not enough columns for line plot")
                     return None
             
-            # Check for categorical column to use for color encoding (multiple series)
-            # Exclude the x and y axis columns from grouping consideration
-            color_columns = [col for col in columns if col != x_col and col != y_col]
-            group_col = self._find_grouping_column(df, color_columns, grouping_hint, col_types)
+            # Use grouping_column from parameter (set by generate_plot)
+            group_col = grouping_column
             
             # Build encoding dictionary
             encoding = {
@@ -320,28 +367,37 @@ class PlotGenerator:
             logger.error(f"Error creating line plot: {e}", exc_info=True)
             return None
     
-    def _create_scatterplot(self, df: pd.DataFrame, columns: List[str], grouping_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def _create_scatterplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[Dict[str, Any]]:
         """Create a scatter plot specification with optional color encoding."""
         try:
             col_types = self._infer_column_types(df, columns)
             
-            # For scatter plots, need two quantitative columns
-            quantitative_cols = [col for col in columns if col_types.get(col) == "quantitative"]
-            
-            if len(quantitative_cols) < 2:
-                # If not enough quantitative columns, use first two columns
-                if len(columns) >= 2:
-                    x_col = columns[0]
-                    y_col = columns[1]
-                else:
-                    logger.warning("Not enough columns for scatter plot")
-                    return None
+            # Use plot_config if available, otherwise infer
+            if plot_config and plot_config.x_column:
+                x_col = plot_config.x_column
             else:
-                x_col = quantitative_cols[0]
-                y_col = quantitative_cols[1]
+                x_col = None
             
-            # Check for categorical column to use for color encoding
-            group_col = self._find_grouping_column(df, columns, grouping_hint, col_types)
+            if plot_config and plot_config.y_column:
+                y_col = plot_config.y_column
+            else:
+                # For scatter plots, need two quantitative columns
+                quantitative_cols = [col for col in columns if col_types.get(col) == "quantitative"]
+                
+                if len(quantitative_cols) < 2:
+                    # If not enough quantitative columns, use first two columns
+                    if len(columns) >= 2:
+                        x_col = columns[0]
+                        y_col = columns[1]
+                    else:
+                        logger.warning("Not enough columns for scatter plot")
+                        return None
+                else:
+                    x_col = quantitative_cols[0]
+                    y_col = quantitative_cols[1]
+            
+            # Use grouping_column from parameter (set by generate_plot)
+            group_col = grouping_column
             
             # Build encoding dictionary
             encoding = {
@@ -367,27 +423,30 @@ class PlotGenerator:
             logger.error(f"Error creating scatter plot: {e}", exc_info=True)
             return None
     
-    def _create_histogram(self, df: pd.DataFrame, columns: List[str], grouping_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def _create_histogram(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[Dict[str, Any]]:
         """Create a histogram specification with support for grouping by categorical columns."""
         try:
             col_types = self._infer_column_types(df, columns)
             
-            # For histograms, need one quantitative column
-            quantitative_cols = [col for col in columns if col_types.get(col) == "quantitative"]
-            categorical_cols = [col for col in columns if col_types.get(col) == "nominal"]
-            
-            if len(quantitative_cols) == 0:
-                # If no quantitative column, use first column
-                if len(columns) > 0:
-                    col = columns[0]
-                else:
-                    logger.warning("No columns for histogram")
-                    return None
+            # Use plot_config if available, otherwise infer
+            if plot_config and plot_config.x_column:
+                col = plot_config.x_column
             else:
-                col = quantitative_cols[0]
+                # For histograms, need one quantitative column
+                quantitative_cols = [col for col in columns if col_types.get(col) == "quantitative"]
+                
+                if len(quantitative_cols) == 0:
+                    # If no quantitative column, use first column
+                    if len(columns) > 0:
+                        col = columns[0]
+                    else:
+                        logger.warning("No columns for histogram")
+                        return None
+                else:
+                    col = quantitative_cols[0]
             
-            # Determine grouping column using helper method
-            group_col = self._find_grouping_column(df, columns, grouping_hint, col_types)
+            # Use grouping_column from parameter (set by generate_plot)
+            group_col = grouping_column
             
             # If there's a categorical column, use it for grouping/color encoding
             # This allows comparing distributions across categories (e.g., species)

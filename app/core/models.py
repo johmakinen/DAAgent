@@ -16,6 +16,16 @@ class PlotSpec(BaseModel):
     plot_type: str = Field(..., description="Type of plot: 'bar', 'line', 'scatter', or 'histogram'")
 
 
+class PlotConfig(BaseModel):
+    """Plot configuration determined by PlotPlanningAgent."""
+    plot_type: str = Field(..., description="Type of plot: 'bar', 'line', 'scatter', or 'histogram'")
+    x_column: Optional[str] = Field(None, description="Column name for x-axis")
+    y_column: Optional[str] = Field(None, description="Column name for y-axis")
+    grouping_column: Optional[str] = Field(None, description="Column name to use for grouping/color encoding")
+    columns: Optional[List[str]] = Field(None, description="List of columns to include in the plot")
+    reasoning: str = Field(..., description="Brief reasoning for the plot configuration")
+
+
 class SynthesizerOutput(BaseModel):
     """Output from SynthesizerAgent including plot decision."""
     message: str = Field(..., description="The agent's response message")

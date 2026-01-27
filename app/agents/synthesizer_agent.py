@@ -79,7 +79,7 @@ class SynthesizerAgent:
             plot_type is not None):
             
             try:
-                plot_spec_dict = self.plot_generator.generate_plot(
+                plot_spec_dict = await self.plot_generator.generate_plot(
                     data=database_data,
                     plot_type=plot_type,
                     question=user_question or "",

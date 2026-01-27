@@ -14,6 +14,7 @@ from app.tools.db_tool import DatabaseTool
 from app.agents.planner_agent import PlannerAgent
 from app.agents.database_query_agent import DatabaseQueryAgent
 from app.agents.synthesizer_agent import SynthesizerAgent
+from app.agents.plot_planning_agent import PlotPlanningAgent
 from app.utils.session_manager import SessionManager
 from app.utils.message_history import MessageHistoryManager
 from app.utils.routing import Router
@@ -70,9 +71,13 @@ class OrchestratorAgent:
         planner_prompt = self.prompt_registry.get_prompt_template("planner-agent", database_pack)
         database_query_prompt = self.prompt_registry.get_prompt_template("database-query-agent", database_pack)
         synthesizer_prompt = self.prompt_registry.get_prompt_template("synthesizer-agent", database_pack)
+        plot_planning_prompt = self.prompt_registry.get_prompt_template("plot-planning-agent", database_pack)
         
-        # Initialize plot generator
-        self.plot_generator = PlotGenerator()
+        # Initialize plot planning agent
+        plot_planning_agent = PlotPlanningAgent(model, plot_planning_prompt, database_pack)
+        
+        # Initialize plot generator with plot planning agent
+        self.plot_generator = PlotGenerator(plot_planning_agent=plot_planning_agent)
         
         # Initialize agents
         self.planner_agent = PlannerAgent(model, planner_prompt, database_pack)
@@ -130,9 +135,11 @@ class OrchestratorAgent:
         
         Args:
             user_message: Original user question
-            agent_output: Output from database query agent (None for general questions)
+            agent_output: Output from database query agent (None for general questions without plots, 
+                         or when no data is needed)
             intent_type: Type of intent that was processed
             message_history: Optional message history for context
+            execution_plan: Optional execution plan with plot requirements
         
         Returns:
             Tuple of (AgentResponse, RunResult) with final user-facing message
@@ -141,13 +148,19 @@ class OrchestratorAgent:
             user_message, agent_output, intent_type, execution_plan
         )
         
-        # Extract database data for plot generation (only for database queries with results)
+        # Extract database data for plot generation
+        # For database_query: always extract if available
+        # For general_question: extract if plot is required and data is available
         database_data = None
-        if intent_type == "database_query" and agent_output is not None:
-            if (agent_output.query_result.success and 
-                agent_output.query_result.data is not None and 
-                len(agent_output.query_result.data) > 0):
-                database_data = agent_output.query_result.data
+        if agent_output is not None:
+            needs_data = (intent_type == "database_query" or 
+                         (intent_type == "general_question" and 
+                          execution_plan and execution_plan.requires_plot))
+            if needs_data:
+                if (agent_output.query_result.success and 
+                    agent_output.query_result.data is not None and 
+                    len(agent_output.query_result.data) > 0):
+                    database_data = agent_output.query_result.data
         
         result = await self.synthesizer_agent.run(
             context, 
@@ -238,8 +251,13 @@ class OrchestratorAgent:
             )
         
         # Execute plan: get data (cached or new query)
+        # For database_query intents, always get data
+        # For general_question intents, get data if plot is required
         agent_output = None
-        if plan.intent_type == "database_query":
+        needs_data = (plan.intent_type == "database_query" or 
+                     (plan.intent_type == "general_question" and plan.requires_plot))
+        
+        if needs_data:
             if plan.use_cached_data:
                 # Retrieve cached data
                 if plan.cached_data_key:
