@@ -1,5 +1,6 @@
 """Synthesizer agent for creating final user-facing responses."""
 import mlflow
+import logging
 from pydantic_ai import Agent, ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
 from typing import Optional, List, Dict
@@ -9,6 +10,8 @@ from app.core.config import Config
 from app.utils.plot_generator import PlotGenerator
 
 mlflow.pydantic_ai.autolog()
+
+logger = logging.getLogger(__name__)
 
 
 class SynthesizerDeps(BaseModel):
@@ -95,9 +98,11 @@ class SynthesizerAgent:
         if execution_plan and execution_plan.requires_plot:
             should_plot = True
             plot_type = execution_plan.plot_type or synthesizer_output.plot_type
+            logger.info(f"Plot required by execution_plan: plot_type={plot_type}")
         elif synthesizer_output.should_generate_plot:
             should_plot = True
             plot_type = synthesizer_output.plot_type
+            logger.info(f"Plot required by synthesizer_output: plot_type={plot_type}")
         
         # Generate plot if needed and we have the required data
         if (should_plot and 
@@ -106,6 +111,7 @@ class SynthesizerAgent:
             len(database_data) > 0 and
             plot_type is not None):
             
+            logger.info(f"Generating plot: type={plot_type}, data_rows={len(database_data)}, columns={synthesizer_output.plot_columns}")
             try:
                 plot_spec_dict = await self.plot_generator.generate_plot(
                     data=database_data,
@@ -119,11 +125,14 @@ class SynthesizerAgent:
                         spec=plot_spec_dict,
                         plot_type=plot_type
                     )
+                    logger.info(f"Successfully generated plot_spec: type={plot_type}, spec_keys={list(plot_spec_dict.keys()) if isinstance(plot_spec_dict, dict) else 'N/A'}")
+                else:
+                    logger.warning("Plot generation returned None")
             except Exception as e:
                 # Log error but don't fail the response
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to generate plot: {e}")
+                logger.warning(f"Failed to generate plot: {e}", exc_info=True)
+        else:
+            logger.info(f"Plot generation skipped: should_plot={should_plot}, plot_generator={self.plot_generator is not None}, database_data={database_data is not None and len(database_data) > 0 if database_data else False}, plot_type={plot_type}")
         
         # Update result output to be AgentResponse
         result.output = agent_response

@@ -1,9 +1,12 @@
 """Database manager for user, session, and chat message operations."""
 import sqlite3
+import logging
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 import json
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
@@ -327,6 +330,13 @@ class DatabaseManager:
         conn = self._get_connection()
         cursor = conn.cursor()
         metadata_json = json.dumps(metadata) if metadata else None
+        
+        # Log if plot_spec is being stored
+        if metadata and isinstance(metadata, dict) and "plot_spec" in metadata:
+            plot_spec = metadata.get("plot_spec")
+            if plot_spec:
+                logger.info(f"Storing plot_spec in database: message_id will be assigned, plot_type={plot_spec.get('plot_type') if isinstance(plot_spec, dict) else 'N/A'}")
+        
         cursor.execute(
             """INSERT INTO chat_messages (user_id, chat_session_id, message, response, intent_type, metadata)
                VALUES (?, ?, ?, ?, ?, ?)""",
@@ -376,6 +386,13 @@ class DatabaseManager:
         messages = []
         for row in rows:
             metadata = json.loads(row["metadata"]) if row["metadata"] else None
+            
+            # Log if plot_spec is being retrieved
+            if metadata and isinstance(metadata, dict) and "plot_spec" in metadata:
+                plot_spec = metadata.get("plot_spec")
+                if plot_spec:
+                    logger.info(f"Retrieved plot_spec from database: message_id={row['id']}, plot_type={plot_spec.get('plot_type') if isinstance(plot_spec, dict) else 'N/A'}")
+            
             messages.append({
                 "id": row["id"],
                 "user_id": row["user_id"],

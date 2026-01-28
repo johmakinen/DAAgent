@@ -38,11 +38,19 @@ from app.utils.plot_generator import _make_json_serializable
 load_dotenv()
 
 # Configure logging to see logs in console
+# Must be configured before other modules create loggers
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    force=True  # Override any existing configuration
 )
+
+# Set log level for application modules to ensure visibility
+# This ensures logs from our application modules are shown
+for module_name in ['app', 'app.api', 'app.agents', 'app.utils', 'app.db', 'app.core']:
+    logging.getLogger(module_name).setLevel(logging.INFO)
+    logging.getLogger(module_name).propagate = True
 
 app = FastAPI(title="Agent app API", version="1.0.0")
 
@@ -65,6 +73,9 @@ ensure_admin_user(db)
 orchestrator = OrchestratorAgent(
     instructions='Be helpful and concise.'
 )
+
+# Test log to verify logging is working
+logger.info("API application initialized - logging is configured")
 
 
 @app.get("/api/health")
@@ -180,16 +191,28 @@ async def chat(
     # Extract plot_spec if present
     plot_spec_dict = None
     if agent_response.plot_spec:
-        plot_spec_dict = {
-            "spec": agent_response.plot_spec.spec,
-            "plot_type": agent_response.plot_spec.plot_type
-        }
-        # Ensure plot_spec is fully JSON-serializable (convert Sets, frozensets, etc.)
-        plot_spec_dict = _make_json_serializable(plot_spec_dict)
-        # Also store in metadata for database storage
-        if agent_response.metadata is None:
-            agent_response.metadata = {}
-        agent_response.metadata["plot_spec"] = plot_spec_dict
+        try:
+            # Defensive checks for plot_spec fields
+            if agent_response.plot_spec.spec and agent_response.plot_spec.plot_type:
+                plot_spec_dict = {
+                    "spec": agent_response.plot_spec.spec,
+                    "plot_type": agent_response.plot_spec.plot_type
+                }
+                # Ensure plot_spec is fully JSON-serializable (convert Sets, frozensets, etc.)
+                plot_spec_dict = _make_json_serializable(plot_spec_dict)
+                logger.info(f"Extracted plot_spec: type={plot_spec_dict.get('plot_type')}, spec_keys={list(plot_spec_dict.get('spec', {}).keys()) if isinstance(plot_spec_dict.get('spec'), dict) else 'N/A'}")
+                
+                # Also store in metadata for database storage
+                if agent_response.metadata is None:
+                    agent_response.metadata = {}
+                agent_response.metadata["plot_spec"] = plot_spec_dict
+            else:
+                logger.warning(f"plot_spec exists but missing required fields: spec={agent_response.plot_spec.spec is not None}, plot_type={agent_response.plot_spec.plot_type is not None}")
+        except Exception as e:
+            logger.error(f"Error extracting plot_spec: {e}", exc_info=True)
+            plot_spec_dict = None
+    else:
+        logger.info("No plot_spec in agent_response")
     
     # Auto-generate title from first message if session has no title
     if not chat_session["title"] and request.message:
@@ -244,6 +267,19 @@ async def get_chat_history(
         plot_spec = None
         if msg.get("metadata") and isinstance(msg["metadata"], dict):
             plot_spec = msg["metadata"].get("plot_spec")
+            if plot_spec:
+                # Validate plot_spec structure
+                if isinstance(plot_spec, dict) and "spec" in plot_spec and "plot_type" in plot_spec:
+                    logger.info(f"Extracted plot_spec from history: message_id={msg['id']}, plot_type={plot_spec.get('plot_type')}")
+                else:
+                    logger.warning(f"Invalid plot_spec structure for message_id={msg['id']}: {type(plot_spec)}, keys={list(plot_spec.keys()) if isinstance(plot_spec, dict) else 'N/A'}")
+                    # Try to fix if structure is wrong
+                    if isinstance(plot_spec, dict) and "spec" not in plot_spec:
+                        plot_spec = None
+            else:
+                logger.info(f"No plot_spec in metadata for message_id={msg['id']}")
+        else:
+            logger.info(f"No metadata for message_id={msg['id']}")
         
         chat_messages.append(
             ChatMessage(

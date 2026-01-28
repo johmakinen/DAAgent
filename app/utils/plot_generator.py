@@ -104,6 +104,8 @@ class PlotGenerator:
         Returns:
             Vega-Lite JSON specification as a dictionary, or None if generation fails
         """
+        logger.info(f"Starting plot generation: type={plot_type}, data_rows={len(data) if data else 0}, columns={columns}")
+        
         if not data or len(data) == 0:
             logger.warning("Cannot generate plot: empty data")
             return None
@@ -139,7 +141,7 @@ class PlotGenerator:
                         column_types=col_types
                     )
                     plot_config = agent_result.output
-                    logger.debug(f"PlotPlanningAgent determined: {plot_config.reasoning}")
+                    logger.info(f"PlotPlanningAgent determined: {plot_config.reasoning}")
                     
                     # Use columns from config if provided, otherwise use original
                     if plot_config.columns:
@@ -156,7 +158,7 @@ class PlotGenerator:
             
             # Fallback to regex-based approach ONLY if agent is not available or failed
             if plot_config is None:
-                logger.debug("Using regex-based fallback for plot configuration")
+                logger.info("Using regex-based fallback for plot configuration")
                 grouping_hint = None
                 if question:
                     question_lower = question.lower()
@@ -185,17 +187,25 @@ class PlotGenerator:
                     grouping_column = self._find_grouping_column(df, columns, grouping_hint, col_types)
             
             # Generate plot based on type
+            plot_spec = None
             if plot_type == "bar":
-                return self._create_barplot(df, columns, grouping_column, plot_config)
+                plot_spec = self._create_barplot(df, columns, grouping_column, plot_config)
             elif plot_type == "line":
-                return self._create_lineplot(df, columns, grouping_column, plot_config)
+                plot_spec = self._create_lineplot(df, columns, grouping_column, plot_config)
             elif plot_type == "scatter":
-                return self._create_scatterplot(df, columns, grouping_column, plot_config)
+                plot_spec = self._create_scatterplot(df, columns, grouping_column, plot_config)
             elif plot_type == "histogram":
-                return self._create_histogram(df, columns, grouping_column, plot_config)
+                plot_spec = self._create_histogram(df, columns, grouping_column, plot_config)
             else:
                 logger.warning(f"Unknown plot type: {plot_type}")
                 return None
+            
+            if plot_spec:
+                logger.info(f"Successfully generated {plot_type} plot spec with keys: {list(plot_spec.keys()) if isinstance(plot_spec, dict) else 'N/A'}")
+            else:
+                logger.warning(f"Plot generation returned None for type: {plot_type}")
+            
+            return plot_spec
                 
         except Exception as e:
             logger.error(f"Error generating plot: {e}", exc_info=True)
