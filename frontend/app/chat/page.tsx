@@ -254,6 +254,23 @@ export default function ChatPage() {
                 >
                   What is the income to apartment size ratio for the postal code area 00100?
                 </button>
+                <button
+                  onClick={() => handleExampleClick('What was the population of the postal number 02650 in 2024?')}
+                  disabled={loading}
+                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ 
+                    backgroundColor: 'hsl(var(--accent-green))',
+                    color: 'hsl(var(--foreground))',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(57, 87%, 78%)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-yellow))';
+                  }}
+                >
+                  What was the population of the postal number 02650 in 2024?
+                </button>
               </div>
             </div>
           </div>

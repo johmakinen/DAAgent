@@ -121,7 +121,9 @@ class OrchestratorAgent:
         self.plot_generator = PlotGenerator(plot_planning_agent=plot_planning_agent)
 
         # Initialize agents with progressive disclosure
-        self.planner_agent = PlannerAgent(model, planner_prompt, database_pack)
+        self.planner_agent = PlannerAgent(
+            model, planner_prompt, database_pack, schema_tool=schema_tool
+        )
         self.database_query_agent = DatabaseQueryAgent(
             model,
             database_query_prompt,

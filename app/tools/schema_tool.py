@@ -60,3 +60,16 @@ class SchemaTool:
             return "No tables available in the database."
         
         return f"Available tables: {', '.join(tables)}"
+    
+    def get_schema_summary(self) -> str:
+        """
+        Get a lightweight summary of the database schema.
+        Returns only database name, description, and table names with brief descriptions.
+        
+        Use this when you need a quick overview of what data is available without
+        detailed column information.
+        
+        Returns:
+            Summary string with database name, description, and table list with descriptions
+        """
+        return self.schema_skill.get_schema_summary()
