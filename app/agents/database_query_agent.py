@@ -1,9 +1,11 @@
 """Database query agent for generating and executing SQL queries."""
 import mlflow
 from pydantic_ai import Agent, RunContext, ModelMessage
+from pydantic_ai.models.openai import OpenAIChatModel
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
 from app.core.models import DatabaseQuery, DatabaseResult, QueryAgentOutput, DatabasePack
+from app.core.config import Config
 from app.tools.db_tool import DatabaseTool
 from app.tools.schema_tool import SchemaTool
 
@@ -26,7 +28,6 @@ class DatabaseQueryAgent:
     
     def __init__(
         self, 
-        model: str, 
         prompt_template: str, 
         db_tool: DatabaseTool, 
         schema_tool: Optional[SchemaTool] = None,
@@ -36,7 +37,6 @@ class DatabaseQueryAgent:
         Initialize the database query agent.
         
         Args:
-            model: The model identifier for the agent
             prompt_template: The prompt template/instructions for the agent (no schema included)
             db_tool: The database tool instance for executing queries
             schema_tool: Optional schema tool for loading schema on-demand
@@ -44,6 +44,15 @@ class DatabaseQueryAgent:
         """
         self.db_tool = db_tool
         self.schema_tool = schema_tool
+        
+        # Get model configuration for this agent (will return MEDIUM_MODEL)
+        model_config = Config.get_model('queryagent')
+        
+        # Convert AzureModelConfig to OpenAIChatModel
+        model = OpenAIChatModel(
+            model_config.name,
+            provider=model_config.provider,
+        )
         
         # Note: prompt_template should NOT have schema information - agent loads it via tools
         self.agent = Agent(

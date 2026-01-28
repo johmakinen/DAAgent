@@ -1,9 +1,11 @@
 """Planner agent for creating execution plans."""
 import mlflow
 from pydantic_ai import Agent, RunContext, ModelMessage
+from pydantic_ai.models.openai import OpenAIChatModel
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
 from app.core.models import ExecutionPlan, DatabasePack
+from app.core.config import Config
 from app.tools.schema_tool import SchemaTool
 
 mlflow.pydantic_ai.autolog()
@@ -24,7 +26,6 @@ class PlannerAgent:
     
     def __init__(
         self, 
-        model: str, 
         prompt_template: str, 
         database_pack: Optional[DatabasePack] = None,
         schema_tool: Optional[SchemaTool] = None
@@ -33,7 +34,6 @@ class PlannerAgent:
         Initialize the planner agent.
         
         Args:
-            model: The model identifier for the agent
             prompt_template: The prompt template/instructions for the agent (pack should already be injected)
             database_pack: Optional database pack (kept for future use, currently template is pre-injected)
             schema_tool: Optional schema tool for accessing table descriptions
@@ -41,6 +41,15 @@ class PlannerAgent:
         # Note: prompt_template should already have pack information injected by PromptRegistry
         # The database_pack parameter is kept for potential future direct use by the agent
         self.schema_tool = schema_tool
+        
+        # Get model configuration for this agent
+        model_config = Config.get_model('planner')
+        
+        # Convert AzureModelConfig to OpenAIChatModel
+        model = OpenAIChatModel(
+            model_config.name,
+            provider=model_config.provider,
+        )
         
         self.agent = Agent(
             model,

@@ -1,9 +1,11 @@
 """Plot planning agent for determining plot configuration from user questions."""
 import mlflow
 from pydantic_ai import Agent, ModelMessage
+from pydantic_ai.models.openai import OpenAIChatModel
 from typing import Optional, List, Dict, Any
 from app.core.models import PlotConfig, DatabasePack
 from app.core.agent_deps import EmptyDeps
+from app.core.config import Config
 
 mlflow.pydantic_ai.autolog()
 class PlotPlanningAgent:
@@ -12,17 +14,26 @@ class PlotPlanningAgent:
     Determines which columns to use, whether grouping is needed, and which column to use for grouping/color encoding.
     """
     
-    def __init__(self, model: str, prompt_template: str, database_pack: Optional[DatabasePack] = None):
+    def __init__(self, prompt_template: str, database_pack: Optional[DatabasePack] = None):
         """
         Initialize the plot planning agent.
         
         Args:
-            model: The model identifier for the agent
             prompt_template: The prompt template/instructions for the agent (pack should already be injected)
             database_pack: Optional database pack (kept for future use, currently template is pre-injected)
         """
         # Note: prompt_template should already have pack information injected by PromptRegistry
         # The database_pack parameter is kept for potential future direct use by the agent
+        
+        # Get model configuration for this agent
+        model_config = Config.get_model('plot-planning')
+        
+        # Convert AzureModelConfig to OpenAIChatModel
+        model = OpenAIChatModel(
+            model_config.name,
+            provider=model_config.provider,
+        )
+        
         self.agent = Agent(
             model,
             instructions=prompt_template,

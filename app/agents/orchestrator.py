@@ -14,6 +14,7 @@ from pydantic_ai import (
     ModelResponse,
     Agent,
 )
+from pydantic_ai.models.openai import OpenAIChatModel
 
 from app.core.models import (
     UserMessage,
@@ -56,19 +57,13 @@ class OrchestratorAgent:
     4. SynthesizerAgent: Takes agent output (or user question for general questions) and creates final user-facing response with plots if needed
     """
 
-    def __init__(
-        self, model: str = None, instructions: str = "Be helpful and concise."
-    ):
+    def __init__(self, instructions: str = "Be helpful and concise."):
         """
         Initialize all agents in the orchestration pipeline.
 
         Args:
-            model: The model identifier for all agents (defaults to Config.DEFAULT_MODEL)
             instructions: Base system instructions (currently unused, kept for compatibility)
         """
-        if model is None:
-            model = Config.DEFAULT_MODEL
-
         self.db_tool = DatabaseTool()
 
         # Load database pack
@@ -114,7 +109,7 @@ class OrchestratorAgent:
 
         # Initialize plot planning agent
         plot_planning_agent = PlotPlanningAgent(
-            model, plot_planning_prompt, database_pack
+            plot_planning_prompt, database_pack
         )
 
         # Initialize plot generator with plot planning agent
@@ -122,22 +117,27 @@ class OrchestratorAgent:
 
         # Initialize agents with progressive disclosure
         self.planner_agent = PlannerAgent(
-            model, planner_prompt, database_pack, schema_tool=schema_tool
+            planner_prompt, database_pack, schema_tool=schema_tool
         )
         self.database_query_agent = DatabaseQueryAgent(
-            model,
             database_query_prompt,
             self.db_tool,
             schema_tool=schema_tool,
             database_pack=database_pack,
         )
         self.synthesizer_agent = SynthesizerAgent(
-            model, synthesizer_prompt, plot_generator=self.plot_generator
+            synthesizer_prompt, plot_generator=self.plot_generator
         )
 
         # Summarizer agent for message history management
+        # Get model configuration for summarizer
+        summarizer_model_config = Config.get_model('summarizer')
+        summarizer_model = OpenAIChatModel(
+            summarizer_model_config.name,
+            provider=summarizer_model_config.provider,
+        )
         summarizer_agent = Agent(
-            Config.SUMMARIZER_MODEL,
+            summarizer_model,
             instructions="Summarize this conversation, omitting small talk and unrelated topics. Focus on the technical discussion and next steps.",
         )
 

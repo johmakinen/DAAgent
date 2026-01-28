@@ -1,18 +1,39 @@
 """Configuration management for the agent system."""
 import os
+from dataclasses import dataclass
 from typing import Optional
 from dotenv import load_dotenv
+from pydantic_ai.providers.azure import AzureProvider
 
 load_dotenv()
 
+@dataclass
+class AzureModelConfig:
+    """Azure model configuration."""
+    name: str
+    provider: AzureProvider
 
 class Config:
     """Centralized configuration management."""
     
     # Model configuration
-    DEFAULT_MODEL: str = os.getenv("DEFAULT_MODEL", "azure:gpt-5-nano")
-    SUMMARIZER_MODEL: str = os.getenv("SUMMARIZER_MODEL", "azure:gpt-5-nano")
-    
+    SMALL_MODEL: AzureModelConfig = AzureModelConfig(
+        name=os.getenv("SMALL_MODEL_AZURE_NAME"),
+        provider=AzureProvider(
+            azure_endpoint=os.getenv("SMALL_MODEL_AZURE_ENDPOINT"),
+            api_version=os.getenv("SMALL_MODEL_AZURE_API_VERSION"),
+            api_key=os.getenv("SMALL_MODEL_AZURE_API_KEY")
+        )
+    )
+    MEDIUM_MODEL: AzureModelConfig = AzureModelConfig(
+        name=os.getenv("MEDIUM_MODEL_AZURE_NAME"),
+        provider=AzureProvider(
+            azure_endpoint=os.getenv("MEDIUM_MODEL_AZURE_ENDPOINT"),
+            api_version=os.getenv("MEDIUM_MODEL_AZURE_API_VERSION"),
+            api_key=os.getenv("MEDIUM_MODEL_AZURE_API_KEY")
+        )
+    )
+
     # MLflow configuration
     MLFLOW_EXPERIMENT_NAME: Optional[str] = os.getenv("MLFLOW_EXPERIMENT_NAME")
     
@@ -24,17 +45,19 @@ class Config:
     HOST: str = os.getenv("HOST", "0.0.0.0")
     
     @classmethod
-    def get_model(cls, agent_type: str = "default") -> str:
+    def get_model(cls, agent_type: str = "default") -> AzureModelConfig:
         """
-        Get model identifier for a specific agent type.
+        Get model configuration for a specific agent type.
         
         Args:
-            agent_type: Type of agent ('default', 'summarizer')
+            agent_type: Type of agent ('queryagent', 'planner', 'synthesizer', 'plot-planning', 'summarizer', 'default')
             
         Returns:
-            Model identifier string
+            AzureModelConfig for the specified agent type
         """
-        if agent_type == "summarizer":
-            return cls.SUMMARIZER_MODEL
-        return cls.DEFAULT_MODEL
+        # Map agent types to models
+        if agent_type == "queryagent":
+            return cls.SMALL_MODEL
+        # All other agents use SMALL_MODEL
+        return cls.SMALL_MODEL
 

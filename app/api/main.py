@@ -34,7 +34,6 @@ from app.core.auth import (
 from app.db.manager import DatabaseManager
 from app.agents.orchestrator import OrchestratorAgent
 from app.core.models import UserMessage
-
 load_dotenv()
 
 app = FastAPI(title="Agent app API", version="1.0.0")
@@ -56,7 +55,6 @@ ensure_admin_user(db)
 
 # Initialize orchestrator agent
 orchestrator = OrchestratorAgent(
-    model='azure:gpt-5-nano',
     instructions='Be helpful and concise.'
 )
 

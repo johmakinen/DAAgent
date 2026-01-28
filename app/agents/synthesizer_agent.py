@@ -1,9 +1,11 @@
 """Synthesizer agent for creating final user-facing responses."""
 import mlflow
 from pydantic_ai import Agent, ModelMessage
+from pydantic_ai.models.openai import OpenAIChatModel
 from typing import Optional, List, Dict
 from pydantic import BaseModel, ConfigDict
 from app.core.models import AgentResponse, SynthesizerOutput, PlotSpec, ExecutionPlan
+from app.core.config import Config
 from app.utils.plot_generator import PlotGenerator
 
 mlflow.pydantic_ai.autolog()
@@ -22,16 +24,25 @@ class SynthesizerAgent:
     Can decide if plots are needed and generate them for database query results.
     """
     
-    def __init__(self, model: str, prompt_template: str, plot_generator: Optional[PlotGenerator] = None):
+    def __init__(self, prompt_template: str, plot_generator: Optional[PlotGenerator] = None):
         """
         Initialize the synthesizer agent.
         
         Args:
-            model: The model identifier for the agent
             prompt_template: The prompt template/instructions for the agent
             plot_generator: Optional PlotGenerator instance for creating plots
         """
         self.plot_generator = plot_generator
+        
+        # Get model configuration for this agent
+        model_config = Config.get_model('synthesizer')
+        
+        # Convert AzureModelConfig to OpenAIChatModel
+        model = OpenAIChatModel(
+            model_config.name,
+            provider=model_config.provider,
+        )
+        
         self.agent = Agent(
             model,
             instructions=prompt_template,
