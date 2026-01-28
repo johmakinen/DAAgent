@@ -19,6 +19,19 @@ Production usage would require:
 - Docker containers and deployment
 - Comprehensive monitoring and logging
 
+
+TODO:
+- Plotting improvements: Better colors, themes, fonts, sizes, labels and legends. 
+- Multi-chat improvements
+- Streamline code, remove redundant code
+- Remove unused code
+- Refactor code for modularity
+- New readme, with updated architecture
+- Less models, more reusability and subclassing
+- RAG for glossary and other interesting knowledge
+- better LLM tests, at least for some agents
+
+
 ## Architecture Overview
 
 The system uses a multi-agent orchestration pattern where specialized agents work together to process user queries. The main flow involves planning, execution, and synthesis stages.
