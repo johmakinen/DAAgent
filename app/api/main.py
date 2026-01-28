@@ -52,6 +52,9 @@ for module_name in ['app', 'app.api', 'app.agents', 'app.utils', 'app.db', 'app.
     logging.getLogger(module_name).setLevel(logging.INFO)
     logging.getLogger(module_name).propagate = True
 
+# Suppress httpx INFO logs (only show WARNING and above)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 app = FastAPI(title="Agent app API", version="1.0.0")
 
 # CORS configuration - Simplified for development

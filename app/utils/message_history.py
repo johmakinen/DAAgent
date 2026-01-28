@@ -55,6 +55,7 @@ class MessageHistoryManager:
             
             summary_prompt = "Summarize this conversation history, focusing on key points and decisions:\n\n" + "\n".join(old_messages_text)
             
+            logger.info(f"LLM Call: SummarizerAgent - summarizing message history ({len(old_messages)} messages)")
             summary_result = await self.summarizer_agent.run(summary_prompt)
             summary_text = summary_result.output if isinstance(summary_result.output, str) else str(summary_result.output)
             

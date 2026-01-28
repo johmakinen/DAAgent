@@ -1,5 +1,6 @@
 """Plot planning agent for determining plot configuration from user questions."""
 import mlflow
+import logging
 from pydantic_ai import Agent, ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
 from typing import Optional, List, Dict, Any
@@ -8,6 +9,8 @@ from app.core.agent_deps import EmptyDeps
 from app.core.config import Config
 
 mlflow.pydantic_ai.autolog()
+
+logger = logging.getLogger(__name__)
 class PlotPlanningAgent:
     """
     Agent for analyzing user questions and data structure to determine optimal plot configuration.
@@ -80,6 +83,7 @@ Analyze the user's question and determine the appropriate plot configuration. Co
 
 Match column names mentioned in the question to the available columns, handling variations like plurals, articles, and partial matches."""
         
+        logger.info("LLM Call: PlotPlanningAgent - determining plot configuration")
         deps = EmptyDeps()
         if message_history:
             return await self.agent.run(context, deps=deps, message_history=message_history)

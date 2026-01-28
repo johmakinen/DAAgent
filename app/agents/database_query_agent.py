@@ -1,5 +1,6 @@
 """Database query agent for generating and executing SQL queries."""
 import mlflow
+import logging
 from pydantic_ai import Agent, RunContext, ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
 from typing import Optional, List
@@ -10,6 +11,8 @@ from app.tools.db_tool import DatabaseTool
 from app.tools.schema_tool import SchemaTool
 
 mlflow.pydantic_ai.autolog()
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseQueryDeps(BaseModel):
@@ -137,6 +140,7 @@ class DatabaseQueryAgent:
         Returns:
             Agent result with QueryAgentOutput output
         """
+        logger.info("LLM Call: DatabaseQueryAgent - generating and executing SQL query")
         deps = DatabaseQueryDeps(
             db_tool=self.db_tool,
             schema_tool=self.schema_tool

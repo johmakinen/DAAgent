@@ -1,7 +1,10 @@
 """Schema loading tools for progressive disclosure of database schema information."""
+import logging
 from typing import Optional
 from app.core.schema_skills import SchemaSkill
 from app.core.models import DatabasePack
+
+logger = logging.getLogger(__name__)
 
 
 class SchemaTool:
@@ -32,6 +35,7 @@ class SchemaTool:
         Returns:
             Formatted string with complete table schema information
         """
+        logger.info(f"SchemaTool.load_table_schema called for table: {table_name}")
         return self.schema_skill.get_table_schema(table_name)
     
     def load_full_schema(self) -> str:
@@ -44,6 +48,7 @@ class SchemaTool:
         Returns:
             Formatted string with complete database schema
         """
+        logger.info("SchemaTool.load_full_schema called")
         return self.schema_skill.get_full_schema()
     
     def list_tables(self) -> str:
@@ -55,6 +60,7 @@ class SchemaTool:
         Returns:
             Formatted string listing all available tables
         """
+        logger.info("SchemaTool.list_tables called")
         tables = self.schema_skill.list_tables()
         if not tables:
             return "No tables available in the database."
@@ -72,4 +78,7 @@ class SchemaTool:
         Returns:
             Summary string with database name, description, and table list with descriptions
         """
-        return self.schema_skill.get_schema_summary()
+        logger.info("SchemaTool.get_schema_summary called")
+        result = self.schema_skill.get_schema_summary()
+        # Log cache status (will be logged by SchemaSkill, but add context here)
+        return result

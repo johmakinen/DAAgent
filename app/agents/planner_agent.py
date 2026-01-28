@@ -1,5 +1,6 @@
 """Planner agent for creating execution plans."""
 import mlflow
+import logging
 from pydantic_ai import Agent, RunContext, ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
 from typing import Optional, List
@@ -9,6 +10,8 @@ from app.core.config import Config
 from app.tools.schema_tool import SchemaTool
 
 mlflow.pydantic_ai.autolog()
+
+logger = logging.getLogger(__name__)
 
 
 class PlannerDeps(BaseModel):
@@ -72,6 +75,7 @@ class PlannerAgent:
             Returns:
                 Summary string with database name, description, and table list with descriptions
             """
+            logger.info("Tool call: PlannerAgent.get_schema_summary")
             if ctx.deps.schema_tool is None:
                 return "Schema tool not available. Cannot get schema summary."
             return ctx.deps.schema_tool.get_schema_summary()
@@ -87,6 +91,7 @@ class PlannerAgent:
         Returns:
             Agent result with ExecutionPlan output
         """
+        logger.info("LLM Call: PlannerAgent - creating execution plan")
         deps = PlannerDeps(schema_tool=self.schema_tool)
         if message_history:
             return await self.agent.run(user_message, deps=deps, message_history=message_history)

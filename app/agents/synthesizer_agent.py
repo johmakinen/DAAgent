@@ -74,6 +74,7 @@ class SynthesizerAgent:
         Returns:
             Agent result with AgentResponse output (includes plot_spec if plot was generated)
         """
+        logger.info("LLM Call: SynthesizerAgent - synthesizing final user-facing response")
         deps = SynthesizerDeps(plot_generator=self.plot_generator)
         if message_history:
             result = await self.agent.run(context, deps=deps, message_history=message_history)
@@ -94,6 +95,13 @@ class SynthesizerAgent:
         # Use plan's plot requirements if available, otherwise use synthesizer output
         should_plot = False
         plot_type = None
+        
+        # Log plot decision inputs for debugging
+        logger.info(
+            f"Plot decision inputs: execution_plan={'present' if execution_plan else 'None'}, "
+            f"execution_plan.requires_plot={execution_plan.requires_plot if execution_plan else 'N/A'}, "
+            f"synthesizer_output.should_generate_plot={synthesizer_output.should_generate_plot}"
+        )
         
         if execution_plan and execution_plan.requires_plot:
             should_plot = True

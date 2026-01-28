@@ -86,6 +86,12 @@ class Router:
         
         # Try up to max_retries + 1 times (initial attempt + retries)
         for attempt in range(self.max_retries + 1):
+            # Log attempt number
+            if attempt == 0:
+                logger.info("LLM Call: DatabaseQueryAgent - initial query attempt")
+            else:
+                logger.info(f"LLM Call: DatabaseQueryAgent - retry attempt {attempt + 1}")
+            
             # Execute a single attempt
             agent_output, run_result = await self._execute_query_attempt(
                 user_message,

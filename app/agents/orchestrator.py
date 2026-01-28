@@ -221,6 +221,7 @@ class OrchestratorAgent:
             message_history=message_history,
             database_data=database_data,
             user_question=user_message,
+            execution_plan=execution_plan,
         )
         return result.output, result
 

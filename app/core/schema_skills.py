@@ -21,6 +21,11 @@ class SchemaSkill:
             database_pack: Optional DatabasePack instance. If None, schema methods return empty strings.
         """
         self.database_pack = database_pack
+        # Initialize cache variables for schema methods
+        self._cached_summary: Optional[str] = None
+        self._cached_full_schema: Optional[str] = None
+        self._cached_tables: Optional[list[str]] = None
+        self._cached_table_schemas: Dict[str, str] = {}
     
     def get_schema_summary(self) -> str:
         """
@@ -33,7 +38,15 @@ class SchemaSkill:
         if self.database_pack is None:
             return ""
         
-        return DatabasePackLoader.format_pack_summary(self.database_pack)
+        # Check cache first
+        if self._cached_summary is not None:
+            logger.debug("Schema summary cache hit")
+            return self._cached_summary
+        
+        # Compute and cache
+        logger.debug("Schema summary cache miss - computing and caching")
+        self._cached_summary = DatabasePackLoader.format_pack_summary(self.database_pack)
+        return self._cached_summary
     
     def get_table_schema(self, table_name: str) -> str:
         """
@@ -41,12 +54,20 @@ class SchemaSkill:
         
         Args:
             table_name: Name of the table to get schema for
-            
+        
         Returns:
             Formatted string with full table schema, or error message if table not found
         """
         if self.database_pack is None:
             return "No database schema available."
+        
+        # Normalize table name for cache key (case-insensitive)
+        cache_key = table_name.lower()
+        
+        # Check cache first
+        if cache_key in self._cached_table_schemas:
+            logger.debug(f"Table schema cache hit for '{table_name}'")
+            return self._cached_table_schemas[cache_key]
         
         # Find the table
         table = None
@@ -57,9 +78,13 @@ class SchemaSkill:
         
         if table is None:
             available_tables = ", ".join([t.name for t in self.database_pack.tables])
-            return f"Table '{table_name}' not found. Available tables: {available_tables}"
+            error_msg = f"Table '{table_name}' not found. Available tables: {available_tables}"
+            # Cache error messages too to avoid repeated lookups
+            self._cached_table_schemas[cache_key] = error_msg
+            return error_msg
         
         # Format table schema
+        logger.debug(f"Table schema cache miss for '{table_name}' - computing and caching")
         lines = [
             f"Table: {table.name}",
             f"Description: {table.description}",
@@ -103,7 +128,10 @@ class SchemaSkill:
                         for query in rel.example_queries[:2]:  # Limit to 2 examples
                             lines.append(f"      - {query}")
         
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        # Cache the result
+        self._cached_table_schemas[cache_key] = result
+        return result
     
     def get_full_schema(self) -> str:
         """
@@ -116,7 +144,15 @@ class SchemaSkill:
         if self.database_pack is None:
             return "No database schema available."
         
-        return DatabasePackLoader.format_pack_for_prompt(self.database_pack, format="detailed")
+        # Check cache first
+        if self._cached_full_schema is not None:
+            logger.debug("Full schema cache hit")
+            return self._cached_full_schema
+        
+        # Compute and cache
+        logger.debug("Full schema cache miss - computing and caching")
+        self._cached_full_schema = DatabasePackLoader.format_pack_for_prompt(self.database_pack, format="detailed")
+        return self._cached_full_schema
     
     def list_tables(self) -> list[str]:
         """
@@ -128,4 +164,12 @@ class SchemaSkill:
         if self.database_pack is None:
             return []
         
-        return [table.name for table in self.database_pack.tables]
+        # Check cache first
+        if self._cached_tables is not None:
+            logger.debug("Tables list cache hit")
+            return self._cached_tables
+        
+        # Compute and cache
+        logger.debug("Tables list cache miss - computing and caching")
+        self._cached_tables = [table.name for table in self.database_pack.tables]
+        return self._cached_tables
