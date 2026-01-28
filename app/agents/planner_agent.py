@@ -1,9 +1,10 @@
 """Planner agent for creating execution plans."""
+import mlflow
 from pydantic_ai import Agent, ModelMessage
 from typing import Optional, List
 from app.core.models import ExecutionPlan, DatabasePack
 
-
+mlflow.pydantic_ai.autolog()
 class PlannerAgent:
     """
     Agent for creating structured execution plans that determine intent, plot requirements,

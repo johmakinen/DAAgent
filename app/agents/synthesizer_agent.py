@@ -1,10 +1,11 @@
 """Synthesizer agent for creating final user-facing responses."""
+import mlflow
 from pydantic_ai import Agent, ModelMessage
 from typing import Optional, List, Dict
 from app.core.models import AgentResponse, SynthesizerOutput, PlotSpec, ExecutionPlan
 from app.utils.plot_generator import PlotGenerator
 
-
+mlflow.pydantic_ai.autolog()
 class SynthesizerAgent:
     """
     Agent for synthesizing clear, natural language responses from agent outputs.

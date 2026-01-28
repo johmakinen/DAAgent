@@ -1,10 +1,11 @@
 """Database query agent for generating and executing SQL queries."""
+import mlflow
 from pydantic_ai import Agent, RunContext, ModelMessage
 from typing import Optional, List
 from app.core.models import DatabaseQuery, DatabaseResult, QueryAgentOutput, DatabasePack
 from app.tools.db_tool import DatabaseTool
 
-
+mlflow.pydantic_ai.autolog()
 class DatabaseQueryAgent:
     """
     Agent for generating SQL queries and executing them against the database.

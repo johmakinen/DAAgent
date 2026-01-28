@@ -1,9 +1,10 @@
 """Plot planning agent for determining plot configuration from user questions."""
+import mlflow
 from pydantic_ai import Agent, ModelMessage
 from typing import Optional, List, Dict, Any
 from app.core.models import PlotConfig, DatabasePack
 
-
+mlflow.pydantic_ai.autolog()
 class PlotPlanningAgent:
     """
     Agent for analyzing user questions and data structure to determine optimal plot configuration.

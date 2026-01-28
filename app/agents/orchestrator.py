@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Optional, List, Any
 import mlflow
 import logging
+import hashlib
+import time
 from pydantic_ai import ModelMessage, UserPromptPart, TextPart, ModelRequest, ModelResponse, Agent
 
 from app.core.models import UserMessage, AgentResponse, IntentClassification, QueryAgentOutput, ExecutionPlan, DatabaseQuery
@@ -25,7 +27,7 @@ from app.utils.plot_generator import PlotGenerator
 
 logger = logging.getLogger(__name__)
 
-
+mlflow.pydantic_ai.autolog()
 class OrchestratorAgent:
     """
     Multi-agent orchestrator implementing the following flow:
@@ -169,30 +171,21 @@ class OrchestratorAgent:
             user_question=user_message
         )
         return result.output, result
-    
-    @mlflow.trace(name="chat")
-    async def chat(
-        self, 
-        user_input: UserMessage, 
+    @mlflow.trace(name="prepare_session_and_history")
+    async def _prepare_session_and_history(
+        self,
+        user_input: UserMessage,
         message_history: Optional[List[ModelMessage]] = None
-    ) -> AgentResponse:
+    ) -> tuple[str, dict[str, Any], List[ModelMessage]]:
         """
-        Main chat interface implementing the full orchestration flow.
-        
-        Flow:
-        1. Check for pending clarification and handle accordingly
-        2. PlannerAgent creates execution plan with intent, plot requirements, and data source decisions
-        3. If clarification needed, store state and return clarification question
-        4. Execute plan: use cached data if specified, or execute DatabaseQueryAgent for new queries
-        5. Store new query results in session cache
-        6. SynthesizerAgent creates final user-facing response with plots if needed
+        Prepare session state, summarize history if needed, and tag trace.
         
         Args:
             user_input: The user's message as a UserMessage model
             message_history: Optional message history for conversation context
-            
+        
         Returns:
-            The agent's response as an AgentResponse model
+            Tuple of (session_id, session_state, current_message_history)
         """
         # Get or create session state
         session_id = user_input.session_id or "default"
@@ -209,6 +202,26 @@ class OrchestratorAgent:
             username=user_input.username
         )
         
+        return session_id, session_state, current_message_history
+    
+    @mlflow.trace(name="handle_clarification_or_create_plan")
+    async def _handle_clarification_or_create_plan(
+        self,
+        user_input: UserMessage,
+        session_state: dict[str, Any],
+        current_message_history: List[ModelMessage]
+    ) -> tuple[ExecutionPlan, str, bool]:
+        """
+        Handle clarification flow or create execution plan.
+        
+        Args:
+            user_input: The user's message as a UserMessage model
+            session_state: Current session state
+            current_message_history: Current message history
+        
+        Returns:
+            Tuple of (ExecutionPlan, user_message_content, is_clarification_response)
+        """
         # Handle clarification flow
         is_clarification_response = self.clarification_handler.is_clarification_response(session_state)
         
@@ -237,19 +250,28 @@ class OrchestratorAgent:
             user_message_content = user_input.content
             self.trace_manager.tag_intent_type(plan.intent_type)
         
-        # Check if clarification is needed
-        if plan.requires_clarification:
-            # Convert ExecutionPlan to IntentClassification for compatibility with clarification handler
-            intent_classification = IntentClassification(
-                intent_type=plan.intent_type,
-                requires_clarification=plan.requires_clarification,
-                clarification_question=plan.clarification_question,
-                reasoning=plan.reasoning
-            )
-            return self.clarification_handler.handle_clarification_request(
-                user_input, intent_classification, session_id, session_state
-            )
+        return plan, user_message_content, is_clarification_response
+    
+    @mlflow.trace(name="execute_plan")
+    async def _execute_plan(
+        self,
+        plan: ExecutionPlan,
+        user_message_content: str,
+        session_id: str,
+        current_message_history: List[ModelMessage]
+    ) -> Optional[QueryAgentOutput]:
+        """
+        Execute the plan to get data (cached or new query).
         
+        Args:
+            plan: Execution plan with data requirements
+            user_message_content: The user's message content
+            session_id: Session identifier
+            current_message_history: Current message history
+        
+        Returns:
+            QueryAgentOutput with query results, or None if no data needed
+        """
         # Execute plan: get data (cached or new query)
         # For database_query intents, always get data
         # For general_question intents, get data if plot is required
@@ -291,8 +313,6 @@ class OrchestratorAgent:
                 
                 # Store query result in cache
                 if agent_output and agent_output.query_result.success:
-                    import hashlib
-                    import time
                     # Create a key from query hash and timestamp
                     query_hash = hashlib.md5(agent_output.sql_query.encode()).hexdigest()[:8]
                     timestamp = str(int(time.time()))
@@ -303,6 +323,36 @@ class OrchestratorAgent:
                     # Clear old results (keep last 5)
                     self.session_manager.clear_old_results(session_id, keep_last_n=5)
         
+        return agent_output
+    
+    @mlflow.trace(name="finalize_response")
+    async def _finalize_response(
+        self,
+        user_message_content: str,
+        agent_output: Optional[QueryAgentOutput],
+        plan: ExecutionPlan,
+        session_id: str,
+        session_state: dict[str, Any],
+        current_message_history: List[ModelMessage],
+        is_clarification_response: bool,
+        user_input: UserMessage
+    ) -> AgentResponse:
+        """
+        Synthesize response, update message history, and add metadata.
+        
+        Args:
+            user_message_content: The user's message content
+            agent_output: Output from database query agent (None if no data needed)
+            plan: Execution plan
+            session_id: Session identifier
+            session_state: Current session state
+            current_message_history: Current message history
+            is_clarification_response: Whether this is a clarification response
+            user_input: Original user input for history update
+        
+        Returns:
+            AgentResponse with final response and metadata
+        """
         # Synthesize final response (use plan's plot requirements if available)
         response, _ = await self._synthesize_response(
             user_message_content,
@@ -327,6 +377,70 @@ class OrchestratorAgent:
         response.metadata["session_id"] = session_id
         
         return response
+    
+    @mlflow.trace(name="chat")
+    async def chat(
+        self, 
+        user_input: UserMessage, 
+        message_history: Optional[List[ModelMessage]] = None
+    ) -> AgentResponse:
+        """
+        Main chat interface implementing the full orchestration flow.
+        
+        Flow:
+        1. Check for pending clarification and handle accordingly
+        2. PlannerAgent creates execution plan with intent, plot requirements, and data source decisions
+        3. If clarification needed, store state and return clarification question
+        4. Execute plan: use cached data if specified, or execute DatabaseQueryAgent for new queries
+        5. Store new query results in session cache
+        6. SynthesizerAgent creates final user-facing response with plots if needed
+        
+        Args:
+            user_input: The user's message as a UserMessage model
+            message_history: Optional message history for conversation context
+            
+        Returns:
+            The agent's response as an AgentResponse model
+        """
+        # Prepare session
+        session_id, session_state, current_message_history = await self._prepare_session_and_history(
+            user_input, message_history
+        )
+        
+        # Handle clarification or create plan
+        plan, user_message_content, is_clarification_response = await self._handle_clarification_or_create_plan(
+            user_input, session_state, current_message_history
+        )
+        
+        # Check if clarification is needed
+        if plan.requires_clarification:
+            # Convert ExecutionPlan to IntentClassification for compatibility with clarification handler
+            intent_classification = IntentClassification(
+                intent_type=plan.intent_type,
+                requires_clarification=plan.requires_clarification,
+                clarification_question=plan.clarification_question,
+                reasoning=plan.reasoning
+            )
+            return self.clarification_handler.handle_clarification_request(
+                user_input, intent_classification, session_id, session_state
+            )
+        
+        # Execute plan
+        agent_output = await self._execute_plan(
+            plan, user_message_content, session_id, current_message_history
+        )
+        
+        # Finalize response
+        return await self._finalize_response(
+            user_message_content,
+            agent_output,
+            plan,
+            session_id,
+            session_state,
+            current_message_history,
+            is_clarification_response,
+            user_input
+        )
     
     @mlflow.trace(name="reset")
     def reset(self, session_id: Optional[str] = None) -> None:
