@@ -34,8 +34,7 @@ class PromptRegistry:
             "3. PLOT REQUIREMENTS: Set requires_plot=True for: trends (line), distributions (histogram), "
             "comparisons (bar), relationships (scatter). Set requires_plot=False for simple counts or single values.\n"
             "   IMPORTANT: If requires_plot=True, the intent_type should typically be 'database_query' since plots need data.\n\n"
-            "4. SQL QUERY: If intent_type='database_query' and use_cached_data=False, generate SQL in sql_query field.\n\n"
-            "5. CLARIFICATION: Only set requires_clarification=True if question is truly ambiguous.\n\n"
+            "4. CLARIFICATION: Only set requires_clarification=True if question is truly ambiguous.\n\n"
             "Provide clear reasoning in the 'reasoning' field."
         ),
         "database-query-agent": (
@@ -57,7 +56,9 @@ class PromptRegistry:
             "   - Analyze the error message (e.g., 'no such column: postal_code_area')\n"
             "   - Use schema tools to understand the correct column/table names\n"
             "   - Pay attention to example values to match user input correctly\n"
-            "   - Generate a corrected query and retry using query_database again\n"
+            "   - CRITICAL: You MUST call query_database again with the corrected query\n"
+            "   - Do NOT just mention the corrected query in your explanation - you MUST execute it\n"
+            "   - The corrected query must be executed via query_database tool, not just described\n"
             "4. You have a MAXIMUM of 3 total attempts (initial query + up to 2 retries)\n"
             "5. After 3 failed attempts:\n"
             "   - Use schema tools to find possible column names that match the error\n"

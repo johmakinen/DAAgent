@@ -34,7 +34,15 @@ from app.core.auth import (
 from app.db.manager import DatabaseManager
 from app.agents.orchestrator import OrchestratorAgent
 from app.core.models import UserMessage
+from app.utils.plot_generator import _make_json_serializable
 load_dotenv()
+
+# Configure logging to see logs in console
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 app = FastAPI(title="Agent app API", version="1.0.0")
 
@@ -176,6 +184,8 @@ async def chat(
             "spec": agent_response.plot_spec.spec,
             "plot_type": agent_response.plot_spec.plot_type
         }
+        # Ensure plot_spec is fully JSON-serializable (convert Sets, frozensets, etc.)
+        plot_spec_dict = _make_json_serializable(plot_spec_dict)
         # Also store in metadata for database storage
         if agent_response.metadata is None:
             agent_response.metadata = {}

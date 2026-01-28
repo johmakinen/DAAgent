@@ -18,7 +18,7 @@ PLOT_STYLE_CONFIG = {
 
 def _make_json_serializable(obj: Any) -> Any:
     """
-    Recursively convert non-JSON-serializable objects (like Sets) to JSON-serializable types.
+    Recursively convert non-JSON-serializable objects (like Sets, frozensets) to JSON-serializable types.
     
     Args:
         obj: Object to convert
@@ -26,17 +26,27 @@ def _make_json_serializable(obj: Any) -> Any:
     Returns:
         JSON-serializable version of the object
     """
-    if isinstance(obj, set):
-        return list(obj)
+    # Handle sets and frozensets (convert to list)
+    if isinstance(obj, (set, frozenset)):
+        return sorted(list(obj)) if obj else []
+    # Handle dictionaries (recursively process values)
     elif isinstance(obj, dict):
         return {key: _make_json_serializable(value) for key, value in obj.items()}
+    # Handle lists and tuples (recursively process items)
     elif isinstance(obj, (list, tuple)):
         return [_make_json_serializable(item) for item in obj]
+    # Handle basic JSON-serializable types
     elif isinstance(obj, (str, int, float, bool, type(None))):
         return obj
+    # Handle numpy types and other numeric types
+    elif hasattr(obj, 'item'):  # numpy scalar types
+        return obj.item()
+    elif hasattr(obj, 'tolist'):  # numpy arrays
+        return _make_json_serializable(obj.tolist())
     else:
         # For other types, try to convert to string or use JSON serialization
         try:
+            # Test if it's already JSON-serializable
             json.dumps(obj)
             return obj
         except (TypeError, ValueError):

@@ -64,7 +64,7 @@ class ExecutionPlan(BaseModel):
     plot_type: Optional[str] = Field(None, description="Type of plot if needed: 'bar', 'line', 'scatter', or 'histogram'")
     use_cached_data: bool = Field(False, description="Whether to use cached data instead of new query")
     cached_data_key: Optional[str] = Field(None, description="Key to identify which cached data to use (e.g., 'latest' or specific identifier)")
-    sql_query: Optional[str] = Field(None, description="SQL query if fetching new data")
+    sql_query: Optional[str] = Field(None, description="DEPRECATED: Do not populate this field. SQL generation is handled by DatabaseQueryAgent, not the planner.")
     explanation: str = Field(..., description="Brief explanation of the execution plan")
 
 

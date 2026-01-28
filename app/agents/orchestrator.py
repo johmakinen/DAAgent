@@ -22,7 +22,6 @@ from app.core.models import (
     IntentClassification,
     QueryAgentOutput,
     ExecutionPlan,
-    DatabaseQuery,
 )
 from app.core.config import Config
 from app.core.prompt_registry import PromptRegistry
@@ -364,20 +363,10 @@ class OrchestratorAgent:
 
             if not plan.use_cached_data:
                 # Execute new database query
-                if plan.sql_query:
-                    # Use SQL from plan if provided
-                    db_query = DatabaseQuery(query=plan.sql_query)
-                    query_result = self.db_tool.execute_query(db_query)
-                    agent_output = QueryAgentOutput(
-                        sql_query=plan.sql_query,
-                        query_result=query_result,
-                        explanation=plan.explanation,
-                    )
-                else:
-                    # Let DatabaseQueryAgent generate and execute query
-                    agent_output, _ = await self.router.route_to_database_query(
-                        user_message_content, message_history=current_message_history
-                    )
+                # Always use DatabaseQueryAgent to generate and execute query
+                agent_output, _ = await self.router.route_to_database_query(
+                    user_message_content, message_history=current_message_history
+                )
 
                 # Store query result in cache
                 if agent_output and agent_output.query_result.success:
