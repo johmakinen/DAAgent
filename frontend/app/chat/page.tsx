@@ -7,6 +7,45 @@ import MessageBubble from '@/components/MessageBubble';
 import ChatInput from '@/components/ChatInput';
 import ResetButton from '@/components/ResetButton';
 
+type ExampleQuestion = {
+  text: string;
+  accentColor: 'blue' | 'green' | 'yellow';
+  hoverColor: string; // HSL color string for hover state
+};
+
+const EXAMPLE_QUESTIONS: ExampleQuestion[] = [
+  {
+    text: 'What are the averages of the petal lengths for each species in the dataset?',
+    accentColor: 'blue',
+    hoverColor: 'hsl(188, 30%, 82%)',
+  },
+  {
+    text: 'What is the maximum sepal width for each species?',
+    accentColor: 'green',
+    hoverColor: 'hsl(95, 10%, 60%)',
+  },
+  {
+    text: 'Is there a correlation between sepal length and width for any of the species?',
+    accentColor: 'yellow',
+    hoverColor: 'hsl(57, 87%, 78%)',
+  },
+  {
+    text: 'What has been the trend development in the income of the postal code area 00100?',
+    accentColor: 'blue',
+    hoverColor: 'hsl(188, 30%, 82%)', // Fixed: was incorrectly using yellow
+  },
+  {
+    text: 'What is the income to apartment size ratio for the postal code area 00100?',
+    accentColor: 'green',
+    hoverColor: 'hsl(95, 10%, 60%)', // Fixed: was incorrectly using yellow
+  },
+  {
+    text: 'What was the population of the postal number 02650 in 2024?',
+    accentColor: 'yellow',
+    hoverColor: 'hsl(57, 87%, 78%)', // Fixed: was incorrectly using yellow
+  },
+];
+
 export default function ChatPage() {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -169,108 +208,26 @@ export default function ChatPage() {
                 Try asking one of these questions:
               </p>
               <div className="space-y-3">
-                <button
-                  onClick={() => handleExampleClick('What are the averages of the petal lengths for each species in the dataset?')}
-                  disabled={loading}
-                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ 
-                    backgroundColor: 'hsl(var(--accent-blue))',
-                    color: 'hsl(var(--foreground))',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(188, 30%, 82%)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-blue))';
-                  }}
-                >
-                  What are the averages of the petal lengths for each species in the dataset?
-                </button>
-                <button
-                  onClick={() => handleExampleClick('What is the maximum sepal width for each species?')}
-                  disabled={loading}
-                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ 
-                    backgroundColor: 'hsl(var(--accent-green))',
-                    color: 'hsl(var(--foreground))',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(95, 10%, 60%)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-green))';
-                  }}
-                >
-                  What is the maximum sepal width for each species?
-                </button>
-                <button
-                  onClick={() => handleExampleClick('Is there a correlation between sepal length and width for any of the species?')}
-                  disabled={loading}
-                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ 
-                    backgroundColor: 'hsl(var(--accent-yellow))',
-                    color: 'hsl(var(--foreground))',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(57, 87%, 78%)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-yellow))';
-                  }}
-                >
-                  Is there a correlation between sepal length and width for any of the species?
-                </button>
-                <button
-                  onClick={() => handleExampleClick('What has been the trend development in the income of the postal code area 00100?')}
-                  disabled={loading}
-                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ 
-                    backgroundColor: 'hsl(var(--accent-blue))',
-                    color: 'hsl(var(--foreground))',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(57, 87%, 78%)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-yellow))';
-                  }}
-                >
-                  What has been the trend development in the income of the postal code area 00100?
-                </button>
-                <button
-                  onClick={() => handleExampleClick('What is the income to apartment size ratio for the postal code area 00100?')}
-                  disabled={loading}
-                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ 
-                    backgroundColor: 'hsl(var(--accent-green))',
-                    color: 'hsl(var(--foreground))',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(57, 87%, 78%)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-yellow))';
-                  }}
-                >
-                  What is the income to apartment size ratio for the postal code area 00100?
-                </button>
-                <button
-                  onClick={() => handleExampleClick('What was the population of the postal number 02650 in 2024?')}
-                  disabled={loading}
-                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ 
-                    backgroundColor: 'hsl(var(--accent-green))',
-                    color: 'hsl(var(--foreground))',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(57, 87%, 78%)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-yellow))';
-                  }}
-                >
-                  What was the population of the postal number 02650 in 2024?
-                </button>
+                {EXAMPLE_QUESTIONS.map((question, index) => (
+                  <button
+                    key={index}
+                    onClick={() => handleExampleClick(question.text)}
+                    disabled={loading}
+                    className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ 
+                      backgroundColor: `hsl(var(--accent-${question.accentColor}))`,
+                      color: 'hsl(var(--foreground))',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!loading) e.currentTarget.style.backgroundColor = question.hoverColor;
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!loading) e.currentTarget.style.backgroundColor = `hsl(var(--accent-${question.accentColor}))`;
+                    }}
+                  >
+                    {question.text}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
