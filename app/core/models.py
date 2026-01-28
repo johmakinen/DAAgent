@@ -87,6 +87,8 @@ class QueryAgentOutput(BaseModel):
     sql_query: str = Field(..., description="The SQL query that was generated and executed")
     query_result: DatabaseResult = Field(..., description="Result from executing the query")
     explanation: str = Field(..., description="Brief explanation of what the query does")
+    requires_clarification: bool = Field(False, description="Whether clarification is needed from the user after max retries")
+    clarification_question: Optional[str] = Field(None, description="Question to ask user if clarification needed (e.g., 'Do you mean X or Y? Both are in the table Z')")
 
 
 class ToolCall(BaseModel):

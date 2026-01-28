@@ -27,7 +27,8 @@ class PlannerAgent:
             model,
             instructions=prompt_template,
             output_type=ExecutionPlan,
-            deps_type=EmptyDeps
+            deps_type=EmptyDeps,
+            name="planner-agent"
         )
     
     async def run(self, user_message: str, message_history: Optional[List[ModelMessage]] = None):

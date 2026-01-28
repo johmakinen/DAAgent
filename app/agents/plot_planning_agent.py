@@ -27,7 +27,8 @@ class PlotPlanningAgent:
             model,
             instructions=prompt_template,
             output_type=PlotConfig,
-            deps_type=EmptyDeps
+            deps_type=EmptyDeps,
+            name="plot-planning-agent"
         )
     
     async def run(

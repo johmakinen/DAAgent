@@ -36,7 +36,8 @@ class SynthesizerAgent:
             model,
             instructions=prompt_template,
             output_type=SynthesizerOutput,
-            deps_type=SynthesizerDeps
+            deps_type=SynthesizerDeps,
+            name="synthesizer-agent"
         )
     
     async def run(

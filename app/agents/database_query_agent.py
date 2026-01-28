@@ -50,7 +50,8 @@ class DatabaseQueryAgent:
             model,
             instructions=prompt_template,
             output_type=QueryAgentOutput,
-            deps_type=DatabaseQueryDeps
+            deps_type=DatabaseQueryDeps,
+            name="database-query-agent"
         )
         
         # Register database tool - tracing is handled in DatabaseTool.execute_query()
