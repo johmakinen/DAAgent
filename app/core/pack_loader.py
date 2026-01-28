@@ -88,5 +88,23 @@ class DatabasePackLoader:
                     lines.append(f"    - {query}")
             lines.append("")
         
+        # Add relationships information if available
+        if pack.relationships:
+            lines.append("Relationships:")
+            for rel in pack.relationships:
+                lines.append(f"  {rel.from_table} -> {rel.to_table} ({rel.type})")
+                lines.append(f"    Description: {rel.description}")
+                lines.append("    Join columns:")
+                for join_col in rel.join_columns:
+                    join_info = f"      - {rel.from_table}.{join_col.from_column} = {rel.to_table}.{join_col.to_column}"
+                    if join_col.description:
+                        join_info += f" ({join_col.description})"
+                    lines.append(join_info)
+                if rel.example_queries:
+                    lines.append("    Example queries:")
+                    for query in rel.example_queries:
+                        lines.append(f"      - {query}")
+                lines.append("")
+        
         return "\n".join(lines)
 

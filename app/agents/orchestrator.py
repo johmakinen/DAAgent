@@ -55,7 +55,7 @@ class OrchestratorAgent:
         # Load database pack
         database_pack: Optional[DatabasePack] = None
         try:
-            pack_path = Path(__file__).parent.parent / "packs" / "iris_database.yaml"
+            pack_path = Path(__file__).parent.parent / "packs" / "database_pack.yaml"
             if pack_path.exists():
                 database_pack = DatabasePackLoader.load_pack(str(pack_path))
                 logger.info(f"Loaded database pack: {database_pack.name}")

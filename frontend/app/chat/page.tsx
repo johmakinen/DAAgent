@@ -204,7 +204,7 @@ export default function ChatPage() {
                   What is the maximum sepal width for each species?
                 </button>
                 <button
-                  onClick={() => handleExampleClick('How many of the setosa samples are larger in sepal width than versicolors?')}
+                  onClick={() => handleExampleClick('Is there a correlation between sepal length and width for any of the species?')}
                   disabled={loading}
                   className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ 
@@ -218,7 +218,41 @@ export default function ChatPage() {
                     if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-yellow))';
                   }}
                 >
-                  How many of the setosa samples are larger in sepal width than versicolors?
+                  Is there a correlation between sepal length and width for any of the species?
+                </button>
+                <button
+                  onClick={() => handleExampleClick('What has been the trend development in the income of the postal code area 00100?')}
+                  disabled={loading}
+                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ 
+                    backgroundColor: 'hsl(var(--accent-blue))',
+                    color: 'hsl(var(--foreground))',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(57, 87%, 78%)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-yellow))';
+                  }}
+                >
+                  What has been the trend development in the income of the postal code area 00100?
+                </button>
+                <button
+                  onClick={() => handleExampleClick('What is the income to apartment size ratio for the postal code area 00100?')}
+                  disabled={loading}
+                  className="w-full rounded-md border border-input px-4 py-3 text-left text-base shadow-sm transition-all hover:border-ring hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ 
+                    backgroundColor: 'hsl(var(--accent-green))',
+                    color: 'hsl(var(--foreground))',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(57, 87%, 78%)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading) e.currentTarget.style.backgroundColor = 'hsl(var(--accent-yellow))';
+                  }}
+                >
+                  What is the income to apartment size ratio for the postal code area 00100?
                 </button>
               </div>
             </div>

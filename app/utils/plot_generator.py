@@ -9,6 +9,12 @@ from app.core.models import PlotConfig
 
 logger = logging.getLogger(__name__)
 
+PLOT_STYLE_CONFIG = {
+                "labelFontSize": 12,
+                "titleFontSize": 14,
+                "labelFontStyle": 'italic',
+                "labelFontWeight": 'bold'
+            }
 
 def _make_json_serializable(obj: Any) -> Any:
     """
@@ -110,8 +116,10 @@ class PlotGenerator:
             # Infer column types
             col_types = self._infer_column_types(df, columns)
             
-            # Use PlotPlanningAgent if available, otherwise fall back to regex-based approach
+            # Use PlotPlanningAgent as primary method, regex only as fallback if agent unavailable or fails
             plot_config = None
+            grouping_column = None
+            
             if self.plot_planning_agent is not None:
                 try:
                     # Call the agent to get plot configuration
@@ -129,16 +137,16 @@ class PlotGenerator:
                         config_columns = [col for col in plot_config.columns if col in df.columns]
                         if config_columns:
                             columns = config_columns
+                    
+                    # Trust the agent's grouping_column decision completely (even if None)
+                    grouping_column = plot_config.grouping_column
                 except Exception as e:
                     logger.warning(f"PlotPlanningAgent failed, falling back to regex: {e}")
                     plot_config = None
             
-            # Fallback to regex-based grouping hint if agent not available or failed
-            grouping_column = None
-            if plot_config and plot_config.grouping_column:
-                grouping_column = plot_config.grouping_column
-            else:
-                # Legacy regex-based approach for backward compatibility
+            # Fallback to regex-based approach ONLY if agent is not available or failed
+            if plot_config is None:
+                logger.debug("Using regex-based fallback for plot configuration")
                 grouping_hint = None
                 if question:
                     question_lower = question.lower()
@@ -148,10 +156,20 @@ class PlotGenerator:
                     if color_match:
                         grouping_hint = color_match.group(2)
                     else:
-                        # Look for general grouping patterns: "by X", "across X", "for each X", "per X"
-                        by_match = re.search(r'\b(by|across|for each|per)\s+(\w+)', question_lower)
-                        if by_match:
-                            grouping_hint = by_match.group(2)
+                        # Look for "for each X" or "for each X's" patterns
+                        for_each_match = re.search(r'\bfor each\s+(\w+)(?:\'s|\')?', question_lower)
+                        if for_each_match:
+                            grouping_hint = for_each_match.group(1)
+                        else:
+                            # Look for "distributions of X for Y" pattern
+                            dist_for_match = re.search(r'\bdistributions?\s+(?:of\s+)?\w+\s+for\s+(\w+)', question_lower)
+                            if dist_for_match:
+                                grouping_hint = dist_for_match.group(1)
+                            else:
+                                # Look for general grouping patterns: "by X", "across X", "per X"
+                                by_match = re.search(r'\b(by|across|per)\s+(\w+)', question_lower)
+                                if by_match:
+                                    grouping_hint = by_match.group(2)
                 
                 if grouping_hint:
                     grouping_column = self._find_grouping_column(df, columns, grouping_hint, col_types)
@@ -209,17 +227,28 @@ class PlotGenerator:
         
         Args:
             df: DataFrame
-            columns: List of column names to consider
+            columns: List of column names to consider (for type inference, but we search all df columns)
             grouping_hint: Optional hint from question parsing (e.g., "species")
             col_types: Optional pre-computed column types dictionary
         
         Returns:
             Name of the grouping column, or None if none found
         """
+        # Infer types for all columns in dataframe, not just the ones in columns list
+        all_cols = list(df.columns)
         if col_types is None:
-            col_types = self._infer_column_types(df, columns)
+            col_types = self._infer_column_types(df, all_cols)
+        else:
+            # Ensure we have types for all columns in the dataframe
+            for col in all_cols:
+                if col not in col_types:
+                    if pd.api.types.is_numeric_dtype(df[col]):
+                        col_types[col] = "quantitative"
+                    else:
+                        col_types[col] = "nominal"
         
-        categorical_cols = [col for col in columns if col_types.get(col) == "nominal"]
+        # Search all categorical columns in the dataframe, not just those in columns list
+        categorical_cols = [col for col in all_cols if col_types.get(col) == "nominal"]
         
         if not categorical_cols:
             return None
@@ -292,7 +321,7 @@ class PlotGenerator:
                 if unique_count <= 10:
                     encoding["color"] = alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
             
-            chart = alt.Chart(df).mark_bar().encode(**encoding)
+            chart = alt.Chart(df).mark_bar().encode(**encoding).configure_axis(**PLOT_STYLE_CONFIG)
             
             spec = chart.to_dict()
             spec = _make_json_serializable(spec)
@@ -356,7 +385,7 @@ class PlotGenerator:
                 if unique_count <= 10:
                     encoding["color"] = alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
             
-            chart = alt.Chart(df).mark_line().encode(**encoding)
+            chart = alt.Chart(df).mark_line().encode(**encoding).configure_axis(**PLOT_STYLE_CONFIG)
             
             spec = chart.to_dict()
             spec = _make_json_serializable(spec)
@@ -412,7 +441,7 @@ class PlotGenerator:
                 if unique_count <= 10:
                     encoding["color"] = alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
             
-            chart = alt.Chart(df).mark_circle().encode(**encoding)
+            chart = alt.Chart(df).mark_circle().encode(**encoding).configure_axis(**PLOT_STYLE_CONFIG)
             
             spec = chart.to_dict()
             spec = _make_json_serializable(spec)
@@ -447,6 +476,11 @@ class PlotGenerator:
             
             # Use grouping_column from parameter (set by generate_plot)
             group_col = grouping_column
+            
+            # Verify grouping column exists in dataframe
+            if group_col and group_col not in df.columns:
+                logger.warning(f"Grouping column '{group_col}' not found in dataframe, ignoring grouping")
+                group_col = None
             
             # If there's a categorical column, use it for grouping/color encoding
             # This allows comparing distributions across categories (e.g., species)

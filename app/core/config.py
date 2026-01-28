@@ -17,7 +17,7 @@ class Config:
     MLFLOW_EXPERIMENT_NAME: Optional[str] = os.getenv("MLFLOW_EXPERIMENT_NAME")
     
     # Database pack configuration
-    DEFAULT_PACK_PATH: str = os.getenv("DEFAULT_PACK_PATH", "app/packs/iris_database.yaml")
+    DEFAULT_PACK_PATH: str = os.getenv("DEFAULT_PACK_PATH", "app/packs/database_pack.yaml")
     
     # Server configuration
     PORT: int = int(os.getenv("PORT", 8000))

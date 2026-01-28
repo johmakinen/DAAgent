@@ -114,9 +114,27 @@ class TableInfo(BaseModel):
     example_queries: Optional[List[str]] = Field(None, description="Example query patterns for this table")
 
 
+class JoinColumn(BaseModel):
+    """Information about a join column between tables."""
+    from_column: str = Field(..., description="Column name in the from_table")
+    to_column: str = Field(..., description="Column name in the to_table")
+    description: Optional[str] = Field(None, description="Description of the join column")
+
+
+class TableRelationship(BaseModel):
+    """Information about a relationship between two tables."""
+    from_table: str = Field(..., description="Source table name")
+    to_table: str = Field(..., description="Target table name")
+    type: str = Field(..., description="Relationship type (e.g., 'many-to-many', 'one-to-many')")
+    description: str = Field(..., description="Description of the relationship")
+    join_columns: List[JoinColumn] = Field(..., description="Columns used to join the tables")
+    example_queries: Optional[List[str]] = Field(None, description="Example queries using this relationship")
+
+
 class DatabasePack(BaseModel):
     """Database pack containing semantic information about the database schema."""
     name: str = Field(..., description="Database name")
     description: str = Field(..., description="Overall database description")
     tables: List[TableInfo] = Field(..., description="List of tables in the database")
+    relationships: Optional[List[TableRelationship]] = Field(None, description="Relationships between tables")
 

@@ -2,6 +2,23 @@
 
 A multi-agent system for answering database queries and general questions using a coordinated pipeline of specialized agents.
 
+# Quickstart (dev)
+
+- Run mlflow server: `uv run mlflow server`
+- Run backend: `uv run uvicorn app.api.main:app --reload --host 0.0.0.0 --port 8000`
+- Register initial prompts: `uv run scripts/register_prompts.py`
+- Make sure you have data in the database: `uv run db/generate_data.py --all`
+- Run frontend: `cd frontend && npm run dev`
+
+This app is not for production usage.
+Production usage would require:
+- Postgres database
+- Authentication
+- CI/CD
+- RLS/OBO policies
+- Docker containers and deployment
+- Comprehensive monitoring and logging
+
 ## Architecture Overview
 
 The system uses a multi-agent orchestration pattern where specialized agents work together to process user queries. The main flow involves planning, execution, and synthesis stages.
@@ -176,7 +193,7 @@ flowchart TD
 - Executes SQL queries safely
 - Returns typed DatabaseResult objects
 - Handles errors gracefully
-- Connects to SQLite database (default: `db/iris_data.db`)
+- Connects to SQLite database (default: `db/MyDataBase.db`)
 
 **Input**: `DatabaseQuery` model with SQL query and optional parameters
 
@@ -421,7 +438,7 @@ The system uses configuration from `app/core/config.py`:
 
 The system uses SQLite databases:
 - `db/app.db`: Application database for users, sessions, and chat history
-- `db/iris_data.db`: Data database for query execution (default)
+- `db/MyDataBase.db`: Data database for query execution (default)
 
 ## API Endpoints
 

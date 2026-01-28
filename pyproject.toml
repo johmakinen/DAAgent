@@ -19,4 +19,7 @@ dependencies = [
     "python-multipart>=0.0.12",
     "scikit-learn>=1.8.0",
     "uvicorn[standard]>=0.32.0",
+    "ipykernel>=7.1.0",
+    "jupyter>=1.1.1",
+    "notebook>=7.5.3",
 ]

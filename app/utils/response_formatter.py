@@ -55,7 +55,7 @@ class ResponseFormatter:
                 if query_output.query_result.row_count == 0:
                     context += "Query returned 0 rows."
                 else:
-                    # Include column information for plot decisions (no raw data)
+                    # Include column information and actual data values
                     if query_output.query_result.data:
                         columns = list(query_output.query_result.data[0].keys())
                         # Infer data types
@@ -71,7 +71,11 @@ class ResponseFormatter:
                             else:
                                 col_info.append(f"{col} (unknown)")
                         
-                        context += f"Query returned {query_output.query_result.row_count} row(s) with columns: {', '.join(col_info)}"
+                        context += f"Query returned {query_output.query_result.row_count} row(s) with columns: {', '.join(col_info)}\n\n"
+                        context += "Query result data:\n"
+                        # Include the actual data so synthesizer can extract and format values
+                        import json
+                        context += json.dumps(query_output.query_result.data, indent=2)
             else:
                 context += f"Query error: {query_output.query_result.error}"
         else:

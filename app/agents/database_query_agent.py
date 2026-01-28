@@ -1,7 +1,6 @@
 """Database query agent for generating and executing SQL queries."""
 from pydantic_ai import Agent, RunContext, ModelMessage
 from typing import Optional, List
-import mlflow
 from app.core.models import DatabaseQuery, DatabaseResult, QueryAgentOutput, DatabasePack
 from app.tools.db_tool import DatabaseTool
 
@@ -32,8 +31,7 @@ class DatabaseQueryAgent:
             deps_type=DatabaseTool
         )
         
-        # Register database tool for query agent
-        @mlflow.trace(name="query_database")
+        # Register database tool - tracing is handled in DatabaseTool.execute_query()
         @self.agent.tool
         def query_database(ctx: RunContext[DatabaseTool], sql_query: str) -> DatabaseResult:
             """
