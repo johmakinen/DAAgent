@@ -164,10 +164,147 @@ class DatabaseManager:
         conn.commit()
         conn.close()
     
+    # Chat session operations
+    def create_chat_session(self, user_id: int, title: Optional[str] = None) -> int:
+        """
+        Create a new chat session.
+        
+        Args:
+            user_id: User ID
+            title: Optional session title
+            
+        Returns:
+            Chat session ID
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        cursor.execute(
+            "INSERT INTO chat_sessions (user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (user_id, title, now, now)
+        )
+        session_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return session_id
+    
+    def get_chat_sessions(self, user_id: int) -> List[Dict[str, Any]]:
+        """
+        Get all chat sessions for a user.
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            List of chat session dicts, ordered by updated_at DESC
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT id, user_id, title, created_at, updated_at
+               FROM chat_sessions
+               WHERE user_id = ?
+               ORDER BY updated_at DESC""",
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        
+        sessions = []
+        for row in rows:
+            sessions.append({
+                "id": row["id"],
+                "user_id": row["user_id"],
+                "title": row["title"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"]
+            })
+        
+        return sessions
+    
+    def get_chat_session(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get a chat session by ID.
+        
+        Args:
+            session_id: Chat session ID
+            
+        Returns:
+            Chat session dict or None if not found
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, user_id, title, created_at, updated_at FROM chat_sessions WHERE id = ?",
+            (session_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                "id": row["id"],
+                "user_id": row["user_id"],
+                "title": row["title"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"]
+            }
+        return None
+    
+    def update_chat_session(self, session_id: int, title: Optional[str] = None) -> None:
+        """
+        Update a chat session.
+        
+        Args:
+            session_id: Chat session ID
+            title: Optional new title
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        if title is not None:
+            cursor.execute(
+                "UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?",
+                (title, datetime.now().isoformat(), session_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE chat_sessions SET updated_at = ? WHERE id = ?",
+                (datetime.now().isoformat(), session_id)
+            )
+        
+        conn.commit()
+        conn.close()
+    
+    def delete_chat_session(self, session_id: int) -> int:
+        """
+        Delete a chat session and all its messages.
+        
+        Args:
+            session_id: Chat session ID
+            
+        Returns:
+            Number of deleted messages
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # Get count of messages before deletion
+        cursor.execute("SELECT COUNT(*) FROM chat_messages WHERE chat_session_id = ?", (session_id,))
+        message_count = cursor.fetchone()[0]
+        
+        # Delete session (cascade will delete messages)
+        cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+        conn.commit()
+        conn.close()
+        
+        return message_count
+    
     # Chat message operations
     def create_chat_message(
         self,
         user_id: int,
+        chat_session_id: int,
         message: str,
         response: str,
         intent_type: Optional[str] = None,
@@ -178,6 +315,7 @@ class DatabaseManager:
         
         Args:
             user_id: User ID
+            chat_session_id: Chat session ID
             message: User message
             response: Bot response
             intent_type: Intent type (optional)
@@ -190,21 +328,29 @@ class DatabaseManager:
         cursor = conn.cursor()
         metadata_json = json.dumps(metadata) if metadata else None
         cursor.execute(
-            """INSERT INTO chat_messages (user_id, message, response, intent_type, metadata)
-               VALUES (?, ?, ?, ?, ?)""",
-            (user_id, message, response, intent_type, metadata_json)
+            """INSERT INTO chat_messages (user_id, chat_session_id, message, response, intent_type, metadata)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user_id, chat_session_id, message, response, intent_type, metadata_json)
         )
         message_id = cursor.lastrowid
+        
+        # Update session's updated_at timestamp
+        cursor.execute(
+            "UPDATE chat_sessions SET updated_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), chat_session_id)
+        )
+        
         conn.commit()
         conn.close()
         return message_id
     
-    def get_chat_history(self, user_id: int, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_chat_history(self, user_id: int, chat_session_id: int, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        Get chat history for a user.
+        Get chat history for a specific chat session.
         
         Args:
             user_id: User ID
+            chat_session_id: Chat session ID
             limit: Maximum number of messages to return (None for all)
             
         Returns:
@@ -214,16 +360,16 @@ class DatabaseManager:
         cursor = conn.cursor()
         
         query = """
-            SELECT id, user_id, message, response, intent_type, metadata, created_at
+            SELECT id, user_id, chat_session_id, message, response, intent_type, metadata, created_at
             FROM chat_messages
-            WHERE user_id = ?
+            WHERE user_id = ? AND chat_session_id = ?
             ORDER BY created_at ASC
         """
         
         if limit:
             query += f" LIMIT {limit}"
         
-        cursor.execute(query, (user_id,))
+        cursor.execute(query, (user_id, chat_session_id))
         rows = cursor.fetchall()
         conn.close()
         
@@ -233,6 +379,7 @@ class DatabaseManager:
             messages.append({
                 "id": row["id"],
                 "user_id": row["user_id"],
+                "chat_session_id": row["chat_session_id"],
                 "message": row["message"],
                 "response": row["response"],
                 "intent_type": row["intent_type"],
@@ -242,19 +389,23 @@ class DatabaseManager:
         
         return messages
     
-    def delete_chat_history(self, user_id: int) -> int:
+    def delete_chat_history(self, user_id: int, chat_session_id: int) -> int:
         """
-        Delete all chat history for a user.
+        Delete chat history for a specific chat session.
         
         Args:
             user_id: User ID
+            chat_session_id: Chat session ID
             
         Returns:
             Number of deleted messages
         """
         conn = self._get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM chat_messages WHERE user_id = ?", (user_id,))
+        cursor.execute(
+            "DELETE FROM chat_messages WHERE user_id = ? AND chat_session_id = ?",
+            (user_id, chat_session_id)
+        )
         deleted_count = cursor.rowcount
         conn.commit()
         conn.close()

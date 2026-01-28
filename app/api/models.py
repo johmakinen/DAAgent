@@ -19,6 +19,7 @@ class LoginResponse(BaseModel):
 class ChatRequest(BaseModel):
     """Chat request model."""
     message: str
+    chat_session_id: int
 
 
 class ChatResponse(BaseModel):
@@ -43,6 +44,31 @@ class ChatMessage(BaseModel):
 class ChatHistoryResponse(BaseModel):
     """Chat history response model."""
     messages: List[ChatMessage]
+    chat_session_id: int
+
+
+class ChatSession(BaseModel):
+    """Chat session model."""
+    id: int
+    user_id: int
+    title: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class ChatSessionsResponse(BaseModel):
+    """Chat sessions response model."""
+    sessions: List[ChatSession]
+
+
+class CreateChatSessionRequest(BaseModel):
+    """Create chat session request model."""
+    title: Optional[str] = None
+
+
+class CreateChatSessionResponse(BaseModel):
+    """Create chat session response model."""
+    session: ChatSession
 
 
 class ErrorResponse(BaseModel):

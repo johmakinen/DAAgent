@@ -1,5 +1,5 @@
 """FastAPI application with chat and authentication endpoints."""
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta
 import os
@@ -19,6 +19,10 @@ from app.api.models import (
     ChatResponse,
     ChatHistoryResponse,
     ChatMessage,
+    ChatSession,
+    ChatSessionsResponse,
+    CreateChatSessionRequest,
+    CreateChatSessionResponse,
     ErrorResponse
 )
 from app.core.auth import (
@@ -133,18 +137,25 @@ async def chat(
     Send a chat message and get a response.
     
     Args:
-        request: Chat message request (optionally includes session_id)
+        request: Chat message request with chat_session_id
         current_user: Current authenticated user
         
     Returns:
         Chat response from the agent
     """
-    # Generate session_id (one session per user for now)
-    # In production, you might want to allow multiple sessions per user
-    session_id = f"user_{current_user['id']}"
+    # Verify chat session belongs to user
+    chat_session = db.get_chat_session(request.chat_session_id)
+    if not chat_session or chat_session["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found"
+        )
     
-    # Load conversation history from database
-    history = db.get_chat_history(current_user["id"])
+    # Generate orchestrator session_id using chat_session_id
+    session_id = f"chat_session_{request.chat_session_id}"
+    
+    # Load conversation history from database for this chat session
+    history = db.get_chat_history(current_user["id"], request.chat_session_id)
     message_history = _convert_history_to_messages(history) if history else None
     
     # Create user message with session_id and username
@@ -172,8 +183,14 @@ async def chat(
             agent_response.metadata = {}
         agent_response.metadata["plot_spec"] = plot_spec_dict
     
+    # Auto-generate title from first message if session has no title
+    if not chat_session["title"] and request.message:
+        title = request.message[:50] + ("..." if len(request.message) > 50 else "")
+        db.update_chat_session(request.chat_session_id, title=title)
+    
     db.create_chat_message(
         user_id=current_user["id"],
+        chat_session_id=request.chat_session_id,
         message=request.message,
         response=agent_response.message,
         intent_type=intent_type,
@@ -190,18 +207,28 @@ async def chat(
 
 @app.get("/api/chat/history", response_model=ChatHistoryResponse)
 async def get_chat_history(
+    chat_session_id: int = Query(..., description="Chat session ID"),
     current_user: dict = Depends(get_current_user_optional)
 ):
     """
-    Get chat history for the current user.
+    Get chat history for a specific chat session.
     
     Args:
+        chat_session_id: Chat session ID
         current_user: Current authenticated user
         
     Returns:
-        Chat history
+        Chat history for the session
     """
-    messages = db.get_chat_history(current_user["id"])
+    # Verify chat session belongs to user
+    chat_session = db.get_chat_session(chat_session_id)
+    if not chat_session or chat_session["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found"
+        )
+    
+    messages = db.get_chat_history(current_user["id"], chat_session_id)
     
     chat_messages = []
     for msg in messages:
@@ -222,27 +249,159 @@ async def get_chat_history(
             )
         )
     
-    return ChatHistoryResponse(messages=chat_messages)
+    return ChatHistoryResponse(messages=chat_messages, chat_session_id=chat_session_id)
 
 
 @app.post("/api/chat/reset")
 async def reset_chat_history(
+    chat_session_id: int = Query(..., description="Chat session ID"),
     current_user: dict = Depends(get_current_user_optional)
 ):
     """
-    Reset (delete) chat history for the current user.
+    Reset (delete) chat history for a specific chat session.
     
     Args:
+        chat_session_id: Chat session ID
         current_user: Current authenticated user
         
     Returns:
         Confirmation message
     """
-    deleted_count = db.delete_chat_history(current_user["id"])
+    # Verify chat session belongs to user
+    chat_session = db.get_chat_session(chat_session_id)
+    if not chat_session or chat_session["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found"
+        )
+    
+    deleted_count = db.delete_chat_history(current_user["id"], chat_session_id)
     
     # Clear session state in orchestrator
-    session_id = f"user_{current_user['id']}"
+    session_id = f"chat_session_{chat_session_id}"
     orchestrator.reset(session_id=session_id)
     
     return {"message": f"Deleted {deleted_count} messages", "deleted_count": deleted_count}
+
+
+@app.post("/api/chat/sessions", response_model=CreateChatSessionResponse)
+async def create_chat_session(
+    request: CreateChatSessionRequest,
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """
+    Create a new chat session.
+    
+    Args:
+        request: Create chat session request with optional title
+        current_user: Current authenticated user
+        
+    Returns:
+        Created chat session
+    """
+    session_id = db.create_chat_session(current_user["id"], title=request.title)
+    session = db.get_chat_session(session_id)
+    
+    return CreateChatSessionResponse(
+        session=ChatSession(
+            id=session["id"],
+            user_id=session["user_id"],
+            title=session["title"],
+            created_at=session["created_at"],
+            updated_at=session["updated_at"]
+        )
+    )
+
+
+@app.get("/api/chat/sessions", response_model=ChatSessionsResponse)
+async def get_chat_sessions(
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """
+    Get all chat sessions for the current user.
+    
+    Args:
+        current_user: Current authenticated user
+        
+    Returns:
+        List of chat sessions
+    """
+    sessions = db.get_chat_sessions(current_user["id"])
+    
+    chat_sessions = []
+    for session in sessions:
+        chat_sessions.append(
+            ChatSession(
+                id=session["id"],
+                user_id=session["user_id"],
+                title=session["title"],
+                created_at=session["created_at"],
+                updated_at=session["updated_at"]
+            )
+        )
+    
+    return ChatSessionsResponse(sessions=chat_sessions)
+
+
+@app.get("/api/chat/sessions/{session_id}", response_model=ChatSession)
+async def get_chat_session(
+    session_id: int,
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """
+    Get a specific chat session.
+    
+    Args:
+        session_id: Chat session ID
+        current_user: Current authenticated user
+        
+    Returns:
+        Chat session
+    """
+    session = db.get_chat_session(session_id)
+    if not session or session["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found"
+        )
+    
+    return ChatSession(
+        id=session["id"],
+        user_id=session["user_id"],
+        title=session["title"],
+        created_at=session["created_at"],
+        updated_at=session["updated_at"]
+    )
+
+
+@app.delete("/api/chat/sessions/{session_id}")
+async def delete_chat_session(
+    session_id: int,
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """
+    Delete a chat session and all its messages.
+    
+    Args:
+        session_id: Chat session ID
+        current_user: Current authenticated user
+        
+    Returns:
+        Confirmation message
+    """
+    # Verify chat session belongs to user
+    session = db.get_chat_session(session_id)
+    if not session or session["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found"
+        )
+    
+    deleted_count = db.delete_chat_session(session_id)
+    
+    # Clear session state in orchestrator
+    orchestrator_session_id = f"chat_session_{session_id}"
+    orchestrator.reset(session_id=orchestrator_session_id)
+    
+    return {"message": f"Deleted session and {deleted_count} messages", "deleted_count": deleted_count}
 

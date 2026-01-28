@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiClient, ChatMessage } from '@/lib/api';
+import { apiClient, ChatMessage, ChatSession } from '@/lib/api';
 import MessageBubble from '@/components/MessageBubble';
 import ChatInput from '@/components/ChatInput';
 import ResetButton from '@/components/ResetButton';
+import ChatSidebar from '@/components/ChatSidebar';
 
 type ExampleQuestion = {
   text: string;
@@ -52,6 +53,9 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [currentChatSessionId, setCurrentChatSessionId] = useState<number | null>(null);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -61,8 +65,8 @@ export default function ChatPage() {
       return;
     }
 
-    // Load chat history
-    loadHistory();
+    // Load chat sessions and initialize
+    initializeChat();
   }, [router]);
 
   useEffect(() => {
@@ -74,10 +78,55 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const loadHistory = async () => {
+  const handleNewChat = async () => {
+    try {
+      const response = await apiClient.createChatSession();
+      const newSession = response.session;
+      setChatSessions((prev) => [newSession, ...prev]);
+      setCurrentChatSessionId(newSession.id);
+      setMessages([]);
+      return newSession.id;
+    } catch (error) {
+      console.error('Failed to create new chat session:', error);
+      alert(error instanceof Error ? error.message : 'Failed to create new chat');
+      return null;
+    }
+  };
+
+  const loadSessions = async () => {
+    try {
+      setLoadingSessions(true);
+      const response = await apiClient.getChatSessions();
+      setChatSessions(response.sessions);
+      
+      // If no sessions exist, create one
+      if (response.sessions.length === 0) {
+        const newSessionId = await handleNewChat();
+        if (newSessionId) {
+          setCurrentChatSessionId(newSessionId);
+        }
+      } else if (!currentChatSessionId) {
+        // Set the first session as current if none is selected
+        setCurrentChatSessionId(response.sessions[0].id);
+      }
+    } catch (error) {
+      console.error('Failed to load chat sessions:', error);
+      if (error instanceof Error && error.message.includes('401')) {
+        router.push('/login');
+      }
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  const initializeChat = async () => {
+    await loadSessions();
+  };
+
+  const loadHistory = async (chatSessionId: number) => {
     try {
       setLoadingHistory(true);
-      const history = await apiClient.getChatHistory();
+      const history = await apiClient.getChatHistory(chatSessionId);
       setMessages(history.messages);
     } catch (error) {
       console.error('Failed to load chat history:', error);
@@ -89,8 +138,14 @@ export default function ChatPage() {
     }
   };
 
+  useEffect(() => {
+    if (currentChatSessionId) {
+      loadHistory(currentChatSessionId);
+    }
+  }, [currentChatSessionId]);
+
   const handleSend = async () => {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || loading || !currentChatSessionId) return;
 
     const userMessage = input.trim();
     setInput('');
@@ -106,10 +161,12 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      const response = await apiClient.chat(userMessage);
+      await apiClient.chat(userMessage, currentChatSessionId);
       
       // Reload history to get the message with proper database ID and response
-      await loadHistory();
+      await loadHistory(currentChatSessionId);
+      // Reload sessions to update titles/timestamps
+      await loadSessions();
     } catch (error) {
       console.error('Failed to send message:', error);
       // Remove the optimistic message on error
@@ -121,12 +178,13 @@ export default function ChatPage() {
   };
 
   const handleReset = async () => {
+    if (!currentChatSessionId) return;
     if (!confirm('Are you sure you want to reset the chat history?')) {
       return;
     }
 
     try {
-      await apiClient.resetChatHistory();
+      await apiClient.resetChatHistory(currentChatSessionId);
       setMessages([]);
     } catch (error) {
       console.error('Failed to reset chat history:', error);
@@ -140,7 +198,7 @@ export default function ChatPage() {
   };
 
   const handleExampleClick = async (question: string) => {
-    if (loading) return;
+    if (loading || !currentChatSessionId) return;
 
     // Optimistically add the user's message immediately
     const optimisticMessage: ChatMessage = {
@@ -153,10 +211,12 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      await apiClient.chat(question);
+      await apiClient.chat(question, currentChatSessionId);
       
       // Reload history to get the message with proper database ID and response
-      await loadHistory();
+      await loadHistory(currentChatSessionId);
+      // Reload sessions to update titles/timestamps
+      await loadSessions();
     } catch (error) {
       console.error('Failed to send message:', error);
       // Remove the optimistic message on error
@@ -167,37 +227,75 @@ export default function ChatPage() {
     }
   };
 
-  if (loadingHistory) {
+  const handleSwitchSession = (sessionId: number) => {
+    setCurrentChatSessionId(sessionId);
+  };
+
+  const handleDeleteSession = async (sessionId: number) => {
+    try {
+      await apiClient.deleteChatSession(sessionId);
+      setChatSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      
+      // If deleted session was current, switch to first available or create new
+      if (currentChatSessionId === sessionId) {
+        const remainingSessions = chatSessions.filter((s) => s.id !== sessionId);
+        if (remainingSessions.length > 0) {
+          setCurrentChatSessionId(remainingSessions[0].id);
+        } else {
+          await handleNewChat();
+        }
+      }
+    } catch (error) {
+      console.error('Failed to delete chat session:', error);
+      alert(error instanceof Error ? error.message : 'Failed to delete chat');
+    }
+  };
+
+  if (loadingHistory || loadingSessions) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center">
           <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto"></div>
-          <p className="text-muted-foreground">Loading chat history...</p>
+          <p className="text-muted-foreground">Loading...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen flex-col bg-background">
-      {/* Header */}
-      <header className="border-b border-border px-4 py-3 shadow-sm" style={{ backgroundColor: 'hsl(var(--header-bg))', color: 'hsl(var(--header-fg))' }}>
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
-          <h1 className="text-2xl font-bold">Agent app</h1>
-          <div className="flex gap-2">
-            <ResetButton onReset={handleReset} disabled={loading || messages.length === 0} />
-            <button
-              onClick={handleLogout}
-              className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </header>
+    <div className="flex h-screen bg-background">
+      {/* Sidebar */}
+      <div className="w-64 flex-shrink-0">
+        <ChatSidebar
+          sessions={chatSessions}
+          currentSessionId={currentChatSessionId}
+          onNewChat={handleNewChat}
+          onSelectSession={handleSwitchSession}
+          onDeleteSession={handleDeleteSession}
+          loading={loading}
+        />
+      </div>
 
-      {/* Messages area */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
+      {/* Main content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <header className="border-b border-border px-4 py-3 shadow-sm" style={{ backgroundColor: 'hsl(var(--header-bg))', color: 'hsl(var(--header-fg))' }}>
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold">Agent app</h1>
+            <div className="flex gap-2">
+              <ResetButton onReset={handleReset} disabled={loading || messages.length === 0 || !currentChatSessionId} />
+              <button
+                onClick={handleLogout}
+                className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Messages area */}
+        <div className="flex-1 overflow-y-auto px-4 py-6">
         {messages.length === 0 ? (
           <div className="flex h-full min-h-[calc(100vh-200px)] flex-col items-center justify-center">
             <div className="mx-auto w-full max-w-2xl space-y-4">
@@ -253,15 +351,16 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Input area */}
-      <div className="border-t border-border bg-card px-4 py-4 shadow-sm">
-        <div className="mx-auto max-w-4xl">
-          <ChatInput
-            value={input}
-            onChange={setInput}
-            onSubmit={handleSend}
-            disabled={loading}
-          />
+        {/* Input area */}
+        <div className="border-t border-border bg-card px-4 py-4 shadow-sm">
+          <div className="mx-auto max-w-4xl">
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSend}
+              disabled={loading || !currentChatSessionId}
+            />
+          </div>
         </div>
       </div>
     </div>
