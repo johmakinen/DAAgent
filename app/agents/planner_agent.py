@@ -3,6 +3,7 @@ import mlflow
 from pydantic_ai import Agent, ModelMessage
 from typing import Optional, List
 from app.core.models import ExecutionPlan, DatabasePack
+from app.core.agent_deps import EmptyDeps
 
 mlflow.pydantic_ai.autolog()
 class PlannerAgent:
@@ -25,7 +26,8 @@ class PlannerAgent:
         self.agent = Agent(
             model,
             instructions=prompt_template,
-            output_type=ExecutionPlan
+            output_type=ExecutionPlan,
+            deps_type=EmptyDeps
         )
     
     async def run(self, user_message: str, message_history: Optional[List[ModelMessage]] = None):
@@ -39,7 +41,8 @@ class PlannerAgent:
         Returns:
             Agent result with ExecutionPlan output
         """
+        deps = EmptyDeps()
         if message_history:
-            return await self.agent.run(user_message, message_history=message_history)
+            return await self.agent.run(user_message, deps=deps, message_history=message_history)
         else:
-            return await self.agent.run(user_message)
+            return await self.agent.run(user_message, deps=deps)

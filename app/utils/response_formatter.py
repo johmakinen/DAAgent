@@ -71,11 +71,25 @@ class ResponseFormatter:
                             else:
                                 col_info.append(f"{col} (unknown)")
                         
-                        context += f"Query returned {query_output.query_result.row_count} row(s) with columns: {', '.join(col_info)}\n\n"
-                        context += "Query result data:\n"
-                        # Include the actual data so synthesizer can extract and format values
-                        import json
-                        context += json.dumps(query_output.query_result.data, indent=2)
+                        row_count = query_output.query_result.row_count
+                        context += f"Query returned {row_count} row(s) with columns: {', '.join(col_info)}\n\n"
+                        
+                        # Optimize data size: for large result sets, include only sample rows
+                        MAX_ROWS_TO_INCLUDE = 50
+                        SAMPLE_SIZE = 10
+                        
+                        if row_count > MAX_ROWS_TO_INCLUDE:
+                            # Include only first SAMPLE_SIZE rows for large result sets
+                            sample_data = query_output.query_result.data[:SAMPLE_SIZE]
+                            import json
+                            context += f"Query result data (showing first {SAMPLE_SIZE} of {row_count} rows):\n"
+                            context += json.dumps(sample_data, indent=2)
+                            context += f"\n\nNote: Full dataset ({row_count} rows) is available for plot generation if needed."
+                        else:
+                            # Include all data for smaller result sets
+                            context += "Query result data:\n"
+                            import json
+                            context += json.dumps(query_output.query_result.data, indent=2)
             else:
                 context += f"Query error: {query_output.query_result.error}"
         else:

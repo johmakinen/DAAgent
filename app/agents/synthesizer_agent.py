@@ -2,10 +2,20 @@
 import mlflow
 from pydantic_ai import Agent, ModelMessage
 from typing import Optional, List, Dict
+from pydantic import BaseModel, ConfigDict
 from app.core.models import AgentResponse, SynthesizerOutput, PlotSpec, ExecutionPlan
 from app.utils.plot_generator import PlotGenerator
 
 mlflow.pydantic_ai.autolog()
+
+
+class SynthesizerDeps(BaseModel):
+    """Dependencies for SynthesizerAgent tools."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
+    plot_generator: Optional[PlotGenerator] = None
+
+
 class SynthesizerAgent:
     """
     Agent for synthesizing clear, natural language responses from agent outputs.
@@ -25,7 +35,8 @@ class SynthesizerAgent:
         self.agent = Agent(
             model,
             instructions=prompt_template,
-            output_type=SynthesizerOutput
+            output_type=SynthesizerOutput,
+            deps_type=SynthesizerDeps
         )
     
     async def run(
@@ -48,7 +59,11 @@ class SynthesizerAgent:
         Returns:
             Agent result with AgentResponse output (includes plot_spec if plot was generated)
         """
-        result = await (self.agent.run(context, message_history=message_history) if message_history else self.agent.run(context))
+        deps = SynthesizerDeps(plot_generator=self.plot_generator)
+        if message_history:
+            result = await self.agent.run(context, deps=deps, message_history=message_history)
+        else:
+            result = await self.agent.run(context, deps=deps)
         
         synthesizer_output = result.output
         

@@ -3,6 +3,7 @@ import mlflow
 from pydantic_ai import Agent, ModelMessage
 from typing import Optional, List, Dict, Any
 from app.core.models import PlotConfig, DatabasePack
+from app.core.agent_deps import EmptyDeps
 
 mlflow.pydantic_ai.autolog()
 class PlotPlanningAgent:
@@ -25,7 +26,8 @@ class PlotPlanningAgent:
         self.agent = Agent(
             model,
             instructions=prompt_template,
-            output_type=PlotConfig
+            output_type=PlotConfig,
+            deps_type=EmptyDeps
         )
     
     async def run(
@@ -66,7 +68,8 @@ Analyze the user's question and determine the appropriate plot configuration. Co
 
 Match column names mentioned in the question to the available columns, handling variations like plurals, articles, and partial matches."""
         
+        deps = EmptyDeps()
         if message_history:
-            return await self.agent.run(context, message_history=message_history)
+            return await self.agent.run(context, deps=deps, message_history=message_history)
         else:
-            return await self.agent.run(context)
+            return await self.agent.run(context, deps=deps)

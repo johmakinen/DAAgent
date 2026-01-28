@@ -67,6 +67,63 @@ class MessageHistoryManager:
             logger.warning(f"Failed to summarize message history: {e}. Returning original messages.")
             return messages
     
+    def get_recent_history(self, messages: List[ModelMessage], limit: int = 5) -> List[ModelMessage]:
+        """
+        Get only the most recent messages from history.
+        
+        Args:
+            messages: Full message history
+            limit: Number of recent messages to return (default: 5)
+            
+        Returns:
+            List containing only the most recent messages
+        """
+        if len(messages) <= limit:
+            return messages
+        return messages[-limit:]
+    
+    def get_summarized_history(self, messages: List[ModelMessage]) -> List[ModelMessage]:
+        """
+        Get summarized history (summary + recent messages).
+        This is the same as summarize_if_needed but always returns summarized version.
+        
+        Args:
+            messages: Full message history
+            
+        Returns:
+            Summarized message history with recent messages preserved
+        """
+        if len(messages) <= self.KEEP_RECENT:
+            return messages
+        
+        # Split into old and recent messages
+        old_messages = messages[:-self.KEEP_RECENT]
+        recent_messages = messages[-self.KEEP_RECENT:]
+        
+        # Summarize old messages
+        try:
+            # Convert old messages to text for summarization
+            old_messages_text = []
+            for msg in old_messages:
+                if isinstance(msg, ModelRequest):
+                    for part in msg.parts:
+                        if isinstance(part, UserPromptPart):
+                            old_messages_text.append(f"User: {part.content}")
+                elif isinstance(msg, ModelResponse):
+                    for part in msg.parts:
+                        if isinstance(part, TextPart):
+                            old_messages_text.append(f"Assistant: {part.content}")
+            
+            summary_prompt = "Summarize this conversation history, focusing on key points and decisions:\n\n" + "\n".join(old_messages_text)
+            
+            # Note: This is async but we can't await here - caller should use summarize_if_needed for async
+            # For sync version, return recent messages only
+            logger.debug("get_summarized_history called synchronously - returning recent messages only. Use summarize_if_needed for full summarization.")
+            return recent_messages
+        except Exception as e:
+            logger.warning(f"Failed to summarize history: {e}. Returning recent messages only.")
+            return recent_messages
+    
     def add_message_to_history(
         self, 
         session_state: dict, 

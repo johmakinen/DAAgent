@@ -40,7 +40,11 @@ class PromptRegistry:
         ),
         "database-query-agent": (
             "Generate an appropriate SQL query to answer the user's database question.\n\n"
-            "{database_pack}\n"
+            "SCHEMA ACCESS:\n"
+            "You have access to schema loading tools. Use them to get database schema information when needed:\n"
+            "- Use list_tables() to see available tables\n"
+            "- Use load_table_schema(table_name) to get detailed schema for a specific table\n"
+            "- Use load_full_schema() to get complete database schema (use when querying multiple tables)\n\n"
             "After generating the query, execute it using the query_database tool. "
             "Then format your response as QueryAgentOutput with: "
             "- sql_query: The SQL query you generated and executed "
@@ -160,22 +164,32 @@ class PromptRegistry:
         except Exception as e:
             logger.warning(f"Failed to register prompt '{name}' in MLflow: {e}. Will use fallback prompt.")
     
-    def _format_prompt_with_pack(self, template: str, pack: Optional[DatabasePack]) -> str:
+    def _format_prompt_with_pack(
+        self, 
+        template: str, 
+        pack: Optional[DatabasePack], 
+        schema_level: str = "full"
+    ) -> str:
         """
         Format a prompt template by replacing {database_pack} placeholder with pack information.
         
         Args:
             template: Prompt template string (may contain {database_pack} placeholder)
             pack: Optional database pack to inject
+            schema_level: Level of schema detail - "none", "summary", or "full"
             
         Returns:
-            Formatted prompt string with pack information injected
+            Formatted prompt string with pack information injected based on schema_level
         """
-        if pack is None:
-            # Remove the placeholder if no pack is provided
+        if pack is None or schema_level == "none":
+            # Remove the placeholder if no pack is provided or schema_level is "none"
             return template.replace("{database_pack}\n", "").replace("{database_pack}", "")
         
-        pack_info = DatabasePackLoader.format_pack_for_prompt(pack)
+        if schema_level == "summary":
+            pack_info = DatabasePackLoader.format_pack_summary(pack)
+        else:  # schema_level == "full"
+            pack_info = DatabasePackLoader.format_pack_for_prompt(pack, format="detailed")
+        
         if pack_info:
             # Format based on context
             if "intent-agent" in template or "Available database information" in template:
@@ -187,28 +201,34 @@ class PromptRegistry:
         
         return template.replace("{database_pack}\n", "").replace("{database_pack}", "")
     
-    def get_prompt_template(self, name: str, database_pack: Optional[DatabasePack] = None) -> str:
+    def get_prompt_template(
+        self, 
+        name: str, 
+        database_pack: Optional[DatabasePack] = None,
+        schema_level: str = "full"
+    ) -> str:
         """
         Get prompt template string from MLflow or fallback.
         
         Args:
             name: Prompt name
             database_pack: Optional database pack to inject into the prompt
+            schema_level: Level of schema detail - "none", "summary", or "full" (default: "full")
             
         Returns:
-            Prompt template string with pack information injected if provided
+            Prompt template string with pack information injected based on schema_level
         """
         # Try to load from MLflow first
         try:
             prompt = mlflow.genai.load_prompt(f"prompts:/{name}@latest")
             template = prompt.template
             if isinstance(template, str):
-                return self._format_prompt_with_pack(template, database_pack)
+                return self._format_prompt_with_pack(template, database_pack, schema_level)
             elif isinstance(template, list):
                 # Chat prompt format - convert to string
                 # This is a simple conversion; may need refinement based on actual usage
                 template_str = "\n".join([f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in template])
-                return self._format_prompt_with_pack(template_str, database_pack)
+                return self._format_prompt_with_pack(template_str, database_pack, schema_level)
             else:
                 raise ValueError(f"Unexpected template type: {type(template)}")
         except Exception as e:
@@ -216,7 +236,7 @@ class PromptRegistry:
             # Fallback to hardcoded prompt
             if name in self.FALLBACK_PROMPTS:
                 template = self.FALLBACK_PROMPTS[name]
-                return self._format_prompt_with_pack(template, database_pack)
+                return self._format_prompt_with_pack(template, database_pack, schema_level)
             else:
                 logger.error(f"No fallback prompt found for '{name}'")
                 raise ValueError(f"Prompt '{name}' not found in MLflow and no fallback available.")

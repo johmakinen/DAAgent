@@ -44,6 +44,33 @@ class DatabasePackLoader:
             raise ValueError(f"Failed to load database pack from {pack_path}: {e}")
     
     @staticmethod
+    def format_pack_summary(pack: Optional[DatabasePack]) -> str:
+        """
+        Format a lightweight summary of the database pack.
+        Returns only database name, description, and table names with brief descriptions.
+        
+        Args:
+            pack: DatabasePack instance to format, or None
+            
+        Returns:
+            Summary string with table names and brief descriptions, or empty string if pack is None
+        """
+        if pack is None:
+            return ""
+        
+        lines = [
+            f"Database: {pack.name}",
+            f"Description: {pack.description}",
+            ""
+        ]
+        
+        lines.append("Available tables:")
+        for table in pack.tables:
+            lines.append(f"  - {table.name}: {table.description}")
+        
+        return "\n".join(lines)
+    
+    @staticmethod
     def format_pack_for_prompt(pack: Optional[DatabasePack], format: str = "detailed") -> str:
         """
         Format a database pack as text for injection into prompts.
@@ -59,10 +86,7 @@ class DatabasePackLoader:
             return ""
         
         if format == "summary":
-            # Brief summary format
-            lines = [f"Database: {pack.name}", f"Description: {pack.description}"]
-            lines.append(f"Tables: {', '.join([t.name for t in pack.tables])}")
-            return "\n".join(lines)
+            return DatabasePackLoader.format_pack_summary(pack)
         
         # Detailed format (default)
         lines = [

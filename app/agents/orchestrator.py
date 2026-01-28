@@ -12,6 +12,8 @@ from app.core.config import Config
 from app.core.prompt_registry import PromptRegistry
 from app.core.pack_loader import DatabasePackLoader
 from app.core.models import DatabasePack
+from app.core.schema_skills import SchemaSkill
+from app.tools.schema_tool import SchemaTool
 from app.tools.db_tool import DatabaseTool
 from app.agents.planner_agent import PlannerAgent
 from app.agents.database_query_agent import DatabaseQueryAgent
@@ -66,14 +68,38 @@ class OrchestratorAgent:
         except Exception as e:
             logger.warning(f"Failed to load database pack: {e}. Continuing without pack.")
         
+        # Initialize schema skill system for progressive disclosure
+        schema_skill = SchemaSkill(database_pack)
+        schema_tool = SchemaTool(schema_skill)
+        
         # Initialize prompt registry
         self.prompt_registry = PromptRegistry()
         
-        # Load prompts from MLflow (or use fallback) with pack injection
-        planner_prompt = self.prompt_registry.get_prompt_template("planner-agent", database_pack)
-        database_query_prompt = self.prompt_registry.get_prompt_template("database-query-agent", database_pack)
-        synthesizer_prompt = self.prompt_registry.get_prompt_template("synthesizer-agent", database_pack)
-        plot_planning_prompt = self.prompt_registry.get_prompt_template("plot-planning-agent", database_pack)
+        # Load prompts from MLflow (or use fallback) with progressive disclosure
+        # PlannerAgent: summary schema (table names only)
+        planner_prompt = self.prompt_registry.get_prompt_template(
+            "planner-agent", 
+            database_pack, 
+            schema_level="summary"
+        )
+        # DatabaseQueryAgent: no schema in prompt (loads via tools)
+        database_query_prompt = self.prompt_registry.get_prompt_template(
+            "database-query-agent", 
+            database_pack, 
+            schema_level="none"
+        )
+        # SynthesizerAgent: no schema needed
+        synthesizer_prompt = self.prompt_registry.get_prompt_template(
+            "synthesizer-agent", 
+            database_pack, 
+            schema_level="none"
+        )
+        # PlotPlanningAgent: no schema needed (uses query result columns)
+        plot_planning_prompt = self.prompt_registry.get_prompt_template(
+            "plot-planning-agent", 
+            database_pack, 
+            schema_level="none"
+        )
         
         # Initialize plot planning agent
         plot_planning_agent = PlotPlanningAgent(model, plot_planning_prompt, database_pack)
@@ -81,9 +107,15 @@ class OrchestratorAgent:
         # Initialize plot generator with plot planning agent
         self.plot_generator = PlotGenerator(plot_planning_agent=plot_planning_agent)
         
-        # Initialize agents
+        # Initialize agents with progressive disclosure
         self.planner_agent = PlannerAgent(model, planner_prompt, database_pack)
-        self.database_query_agent = DatabaseQueryAgent(model, database_query_prompt, self.db_tool, database_pack)
+        self.database_query_agent = DatabaseQueryAgent(
+            model, 
+            database_query_prompt, 
+            self.db_tool, 
+            schema_tool=schema_tool,
+            database_pack=database_pack
+        )
         self.synthesizer_agent = SynthesizerAgent(model, synthesizer_prompt, plot_generator=self.plot_generator)
         
         # Summarizer agent for message history management
