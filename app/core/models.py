@@ -11,8 +11,8 @@ class UserMessage(BaseModel):
 
 
 class PlotSpec(BaseModel):
-    """Vega-Lite plot specification model."""
-    spec: Dict[str, Any] = Field(..., description="Vega-Lite JSON specification")
+    """Plotly figure specification model."""
+    spec: Dict[str, Any] = Field(..., description="Plotly figure dictionary with 'data' and 'layout' keys")
     plot_type: str = Field(..., description="Type of plot: 'bar', 'line', 'scatter', or 'histogram'")
 
 
@@ -43,7 +43,7 @@ class AgentResponse(BaseModel):
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="Confidence score if applicable")
     requires_followup: bool = Field(False, description="Whether the response requires user followup")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
-    plot_spec: Optional[PlotSpec] = Field(None, description="Optional Vega-Lite plot specification")
+    plot_spec: Optional[PlotSpec] = Field(None, description="Optional Plotly figure specification")
 
 
 class IntentClassification(BaseModel):

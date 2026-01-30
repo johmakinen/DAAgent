@@ -57,6 +57,7 @@ export default function ChatPage() {
   const [currentChatSessionId, setCurrentChatSessionId] = useState<number | null>(null);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     // Check authentication
@@ -160,19 +161,49 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, optimisticMessage]);
     setLoading(true);
 
+    // Create AbortController for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
-      await apiClient.chat(userMessage, currentChatSessionId);
+      await apiClient.chat(userMessage, currentChatSessionId, abortController.signal);
       
       // Reload history to get the message with proper database ID and response
       await loadHistory(currentChatSessionId);
       // Reload sessions to update titles/timestamps
       await loadSessions();
     } catch (error) {
-      console.error('Failed to send message:', error);
-      // Remove the optimistic message on error
-      setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessage.id));
-      alert(error instanceof Error ? error.message : 'Failed to send message');
+      // Don't show error if request was aborted
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Request aborted by user');
+        // Remove the optimistic message on abort
+        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessage.id));
+      } else {
+        console.error('Failed to send message:', error);
+        // Remove the optimistic message on error
+        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessage.id));
+        alert(error instanceof Error ? error.message : 'Failed to send message');
+      }
     } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleStop = async () => {
+    if (abortControllerRef.current && currentChatSessionId) {
+      // Cancel the frontend request
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      
+      // Also signal the backend to stop processing
+      try {
+        await apiClient.cancelChatRequest(currentChatSessionId);
+      } catch (error) {
+        console.error('Failed to cancel request on backend:', error);
+        // Continue anyway - frontend cancellation is already done
+      }
+      
       setLoading(false);
     }
   };
@@ -210,20 +241,32 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, optimisticMessage]);
     setLoading(true);
 
+    // Create AbortController for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
-      await apiClient.chat(question, currentChatSessionId);
+      await apiClient.chat(question, currentChatSessionId, abortController.signal);
       
       // Reload history to get the message with proper database ID and response
       await loadHistory(currentChatSessionId);
       // Reload sessions to update titles/timestamps
       await loadSessions();
     } catch (error) {
-      console.error('Failed to send message:', error);
-      // Remove the optimistic message on error
-      setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessage.id));
-      alert(error instanceof Error ? error.message : 'Failed to send message');
+      // Don't show error if request was aborted
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Request aborted by user');
+        // Remove the optimistic message on abort
+        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessage.id));
+      } else {
+        console.error('Failed to send message:', error);
+        // Remove the optimistic message on error
+        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessage.id));
+        alert(error instanceof Error ? error.message : 'Failed to send message');
+      }
     } finally {
       setLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -354,12 +397,25 @@ export default function ChatPage() {
         {/* Input area */}
         <div className="border-t border-border bg-card px-4 py-4 shadow-sm">
           <div className="mx-auto max-w-4xl">
-            <ChatInput
-              value={input}
-              onChange={setInput}
-              onSubmit={handleSend}
-              disabled={loading || !currentChatSessionId}
-            />
+            <div className="flex gap-2 items-center">
+              <div className="flex-1">
+                <ChatInput
+                  value={input}
+                  onChange={setInput}
+                  onSubmit={handleSend}
+                  disabled={loading || !currentChatSessionId}
+                />
+              </div>
+              {loading && (
+                <button
+                  onClick={handleStop}
+                  className="rounded-md border border-destructive bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 focus:outline-none focus:ring-2 focus:ring-destructive focus:ring-offset-2 transition-colors"
+                  aria-label="Stop generation"
+                >
+                  Stop generation
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { ChatMessage } from '@/lib/api';
-import VegaPlot from './VegaPlot';
+import PlotlyPlot from './PlotlyPlot';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -22,12 +22,10 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
       {/* Bot response - only show if there's a response or show loading indicator */}
       {hasResponse ? (
         <>
-          {/* Plot as separate message bubble - shown first if available */}
+          {/* Plot as full-width container - shown first if available */}
           {message.plot_spec && message.plot_spec.spec && (
-            <div className="flex justify-start">
-              <div className="max-w-[80%] rounded-lg rounded-tl-sm px-4 py-3 shadow-sm border border-border/50" style={{ backgroundColor: 'hsl(var(--chat-bot-bg))', color: 'hsl(var(--chat-bot-fg))' }}>
-                <VegaPlot spec={message.plot_spec.spec} plotType={message.plot_spec.plot_type} />
-              </div>
+            <div className="w-full -mx-4 px-4">
+              <PlotlyPlot spec={message.plot_spec.spec} plotType={message.plot_spec.plot_type} />
             </div>
           )}
           {/* Text response as separate message bubble */}

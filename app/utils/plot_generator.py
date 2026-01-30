@@ -1,20 +1,112 @@
-"""Plot generation utility using Altair to create Vega-Lite specifications."""
+"""Plot generation utility using Plotly to create interactive charts."""
 import logging
 import re
 import json
 from typing import Optional, List, Dict, Any
 import pandas as pd
-import altair as alt
+import plotly.graph_objects as go
 from app.core.models import PlotConfig
 
 logger = logging.getLogger(__name__)
 
-PLOT_STYLE_CONFIG = {
-                "labelFontSize": 12,
-                "titleFontSize": 14,
-                "labelFontStyle": 'italic',
-                "labelFontWeight": 'bold'
-            }
+# Executive-friendly color palette (professional blues, grays, muted colors)
+EXECUTIVE_COLORS = [
+    '#1f77b4',  # Blue
+    '#2ca02c',  # Green
+    '#d62728',  # Red
+    '#ff7f0e',  # Orange
+    '#9467bd',  # Purple
+    '#8c564b',  # Brown
+    '#e377c2',  # Pink
+    '#7f7f7f',  # Gray
+    '#bcbd22',  # Olive
+    '#17becf',  # Cyan
+]
+
+def _get_executive_layout(title: Optional[str] = None, xaxis_title: Optional[str] = None, yaxis_title: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get executive-friendly layout configuration for Plotly charts.
+    
+    Args:
+        title: Chart title
+        xaxis_title: X-axis title
+        yaxis_title: Y-axis title
+    
+    Returns:
+        Layout dictionary with professional styling
+    """
+    layout = {
+        "title": {
+            "text": title or "",
+            "font": {
+                "size": 20,
+                "family": "Arial, sans-serif",
+                "color": "#2c3e50"
+            },
+            "x": 0.5,
+            "xanchor": "center"
+        },
+        "font": {
+            "family": "Arial, sans-serif",
+            "size": 14,
+            "color": "#2c3e50"
+        },
+        "plot_bgcolor": "white",
+        "paper_bgcolor": "white",
+        "margin": {
+            "l": 80,
+            "r": 50,
+            "t": 80,
+            "b": 80
+        },
+        "xaxis": {
+            "title": {
+                "text": xaxis_title or "",
+                "font": {
+                    "size": 16,
+                    "family": "Arial, sans-serif",
+                    "color": "#2c3e50"
+                }
+            },
+            "showgrid": True,
+            "gridcolor": "#e0e0e0",
+            "gridwidth": 1,
+            "zeroline": False,
+            "linecolor": "#b0b0b0",
+            "linewidth": 1
+        },
+        "yaxis": {
+            "title": {
+                "text": yaxis_title or "",
+                "font": {
+                    "size": 16,
+                    "family": "Arial, sans-serif",
+                    "color": "#2c3e50"
+                }
+            },
+            "showgrid": True,
+            "gridcolor": "#e0e0e0",
+            "gridwidth": 1,
+            "zeroline": False,
+            "linecolor": "#b0b0b0",
+            "linewidth": 1
+        },
+        "legend": {
+            "font": {
+                "size": 14,
+                "family": "Arial, sans-serif",
+                "color": "#2c3e50"
+            },
+            "bgcolor": "rgba(255, 255, 255, 0.8)",
+            "bordercolor": "#e0e0e0",
+            "borderwidth": 1
+        },
+        "hovermode": "closest",
+        "width": 800,
+        "height": 500
+    }
+    return layout
+
 
 def _make_json_serializable(obj: Any) -> Any:
     """
@@ -54,27 +146,8 @@ def _make_json_serializable(obj: Any) -> Any:
             return str(obj)
 
 
-def _ensure_schema_version(spec: Dict[str, Any], target_version: str = "5.17.0") -> Dict[str, Any]:
-    """
-    Ensure the Vega-Lite specification has the correct $schema version.
-    
-    Args:
-        spec: Vega-Lite specification dictionary
-        target_version: Target Vega-Lite version (default: 6.1.0)
-        
-    Returns:
-        Specification with ensured $schema field
-    """
-    if not isinstance(spec, dict):
-        return spec
-    
-    # Ensure $schema is set to the target version
-    spec["$schema"] = f"https://vega.github.io/schema/vega-lite/v{target_version}.json"
-    return spec
-
-
 class PlotGenerator:
-    """Utility class for generating Vega-Lite plot specifications using Altair."""
+    """Utility class for generating Plotly charts with executive-friendly styling."""
     
     def __init__(self, plot_planning_agent: Optional[Any] = None):
         """
@@ -93,7 +166,7 @@ class PlotGenerator:
         columns: Optional[List[str]] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Generate a Vega-Lite plot specification.
+        Generate a Plotly figure dictionary.
         
         Args:
             data: List of dictionaries representing the data rows
@@ -102,7 +175,7 @@ class PlotGenerator:
             columns: Optional list of column names to use for the plot
         
         Returns:
-            Vega-Lite JSON specification as a dictionary, or None if generation fails
+            Plotly figure dictionary (with 'data' and 'layout' keys), or None if generation fails
         """
         logger.info(f"Starting plot generation: type={plot_type}, data_rows={len(data) if data else 0}, columns={columns}")
         
@@ -187,25 +260,29 @@ class PlotGenerator:
                     grouping_column = self._find_grouping_column(df, columns, grouping_hint, col_types)
             
             # Generate plot based on type
-            plot_spec = None
+            fig = None
             if plot_type == "bar":
-                plot_spec = self._create_barplot(df, columns, grouping_column, plot_config)
+                fig = self._create_barplot(df, columns, grouping_column, plot_config)
             elif plot_type == "line":
-                plot_spec = self._create_lineplot(df, columns, grouping_column, plot_config)
+                fig = self._create_lineplot(df, columns, grouping_column, plot_config)
             elif plot_type == "scatter":
-                plot_spec = self._create_scatterplot(df, columns, grouping_column, plot_config)
+                fig = self._create_scatterplot(df, columns, grouping_column, plot_config)
             elif plot_type == "histogram":
-                plot_spec = self._create_histogram(df, columns, grouping_column, plot_config)
+                fig = self._create_histogram(df, columns, grouping_column, plot_config)
             else:
                 logger.warning(f"Unknown plot type: {plot_type}")
                 return None
             
-            if plot_spec:
-                logger.info(f"Successfully generated {plot_type} plot spec with keys: {list(plot_spec.keys()) if isinstance(plot_spec, dict) else 'N/A'}")
+            if fig:
+                # Convert Plotly figure to dictionary
+                fig_dict = fig.to_dict()
+                # Make it JSON-serializable
+                fig_dict = _make_json_serializable(fig_dict)
+                logger.info(f"Successfully generated {plot_type} plot with {len(fig_dict.get('data', []))} traces")
+                return fig_dict
             else:
                 logger.warning(f"Plot generation returned None for type: {plot_type}")
-            
-            return plot_spec
+                return None
                 
         except Exception as e:
             logger.error(f"Error generating plot: {e}", exc_info=True)
@@ -289,8 +366,8 @@ class PlotGenerator:
         # If no hint or no match, use first categorical column
         return categorical_cols[0]
     
-    def _create_barplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[Dict[str, Any]]:
-        """Create a bar plot specification with optional color encoding."""
+    def _create_barplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[go.Figure]:
+        """Create a bar plot with optional color encoding."""
         try:
             col_types = self._infer_column_types(df, columns)
             
@@ -322,38 +399,68 @@ class PlotGenerator:
             # Use grouping_column from parameter (set by generate_plot)
             group_col = grouping_column
             
-            # Build encoding dictionary
+            # Determine y-axis values
             if y_col is None:
-                encoding = {
-                    "x": alt.X(x_col, type=col_types.get(x_col, "nominal")),
-                    "y": alt.Y("count()", title="Count")
-                }
+                # Count by x_col
+                y_values = df.groupby(x_col).size().reset_index(name='count')
+                y_col_name = 'count'
+                y_title = "Count"
             else:
-                encoding = {
-                    "x": alt.X(x_col, type=col_types.get(x_col, "nominal")),
-                    "y": alt.Y(f"mean({y_col}):Q", title=f"Mean {y_col}")
-                }
+                # Aggregate by x_col
+                if group_col and group_col != x_col:
+                    y_values = df.groupby([x_col, group_col])[y_col].mean().reset_index()
+                    y_col_name = y_col
+                    y_title = f"Mean {y_col}"
+                else:
+                    y_values = df.groupby(x_col)[y_col].mean().reset_index()
+                    y_col_name = y_col
+                    y_title = f"Mean {y_col}"
             
-            # Add color encoding if we have a grouping column (different from x-axis)
-            if group_col and group_col != x_col:
-                unique_count = df[group_col].nunique()
-                # Use color encoding for up to 10 categories
-                if unique_count <= 10:
-                    encoding["color"] = alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
+            # Create figure
+            if group_col and group_col != x_col and y_values[group_col].nunique() <= 10:
+                # Use color grouping
+                fig = go.Figure()
+                unique_groups = sorted(y_values[group_col].unique())
+                for i, group_val in enumerate(unique_groups):
+                    group_data = y_values[y_values[group_col] == group_val]
+                    fig.add_trace(go.Bar(
+                        x=group_data[x_col],
+                        y=group_data[y_col_name],
+                        name=str(group_val),
+                        marker_color=EXECUTIVE_COLORS[i % len(EXECUTIVE_COLORS)],
+                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{x_col}: %{{x}}<br>{y_title}: %{{y}}<extra></extra>'
+                    ))
+                layout = _get_executive_layout(
+                    title=f"{y_title} by {x_col}",
+                    xaxis_title=x_col,
+                    yaxis_title=y_title
+                )
+                fig.update_layout(**layout)
+            else:
+                # Simple bar chart
+                fig = go.Figure(data=[
+                    go.Bar(
+                        x=y_values[x_col],
+                        y=y_values[y_col_name],
+                        marker_color=EXECUTIVE_COLORS[0],
+                        hovertemplate=f'<b>{x_col}: %{{x}}</b><br>{y_title}: %{{y}}<extra></extra>'
+                    )
+                ])
+                layout = _get_executive_layout(
+                    title=f"{y_title} by {x_col}",
+                    xaxis_title=x_col,
+                    yaxis_title=y_title
+                )
+                fig.update_layout(**layout)
             
-            chart = alt.Chart(df).mark_bar().encode(**encoding).configure_axis(**PLOT_STYLE_CONFIG)
-            
-            spec = chart.to_dict()
-            spec = _make_json_serializable(spec)
-            spec = _ensure_schema_version(spec)
-            return spec
+            return fig
             
         except Exception as e:
             logger.error(f"Error creating bar plot: {e}", exc_info=True)
             return None
     
-    def _create_lineplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[Dict[str, Any]]:
-        """Create a line plot specification with optional color encoding for multiple series."""
+    def _create_lineplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[go.Figure]:
+        """Create a line plot with optional color encoding for multiple series."""
         try:
             col_types = self._infer_column_types(df, columns)
             
@@ -392,32 +499,55 @@ class PlotGenerator:
             # Use grouping_column from parameter (set by generate_plot)
             group_col = grouping_column
             
-            # Build encoding dictionary
-            encoding = {
-                "x": alt.X(x_col, type=col_types.get(x_col, "quantitative")),
-                "y": alt.Y(y_col, type="quantitative")
-            }
+            # Create figure
+            fig = go.Figure()
             
-            # Add color encoding if we have a grouping column
-            if group_col:
-                unique_count = df[group_col].nunique()
-                # Use color encoding for up to 10 categories
-                if unique_count <= 10:
-                    encoding["color"] = alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
+            if group_col and df[group_col].nunique() <= 10:
+                # Multiple lines by group
+                unique_groups = sorted(df[group_col].unique())
+                for i, group_val in enumerate(unique_groups):
+                    group_data = df[df[group_col] == group_val].sort_values(x_col)
+                    fig.add_trace(go.Scatter(
+                        x=group_data[x_col],
+                        y=group_data[y_col],
+                        mode='lines+markers',
+                        name=str(group_val),
+                        line=dict(color=EXECUTIVE_COLORS[i % len(EXECUTIVE_COLORS)], width=2.5),
+                        marker=dict(size=6),
+                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{x_col}: %{{x}}<br>{y_col}: %{{y}}<extra></extra>'
+                    ))
+                layout = _get_executive_layout(
+                    title=f"{y_col} over {x_col}",
+                    xaxis_title=x_col,
+                    yaxis_title=y_col
+                )
+                fig.update_layout(**layout)
+            else:
+                # Single line
+                sorted_df = df.sort_values(x_col)
+                fig.add_trace(go.Scatter(
+                    x=sorted_df[x_col],
+                    y=sorted_df[y_col],
+                    mode='lines+markers',
+                    line=dict(color=EXECUTIVE_COLORS[0], width=2.5),
+                    marker=dict(size=6),
+                    hovertemplate=f'<b>{x_col}: %{{x}}</b><br>{y_col}: %{{y}}<extra></extra>'
+                ))
+                layout = _get_executive_layout(
+                    title=f"{y_col} over {x_col}",
+                    xaxis_title=x_col,
+                    yaxis_title=y_col
+                )
+                fig.update_layout(**layout)
             
-            chart = alt.Chart(df).mark_line().encode(**encoding).configure_axis(**PLOT_STYLE_CONFIG)
-            
-            spec = chart.to_dict()
-            spec = _make_json_serializable(spec)
-            spec = _ensure_schema_version(spec)
-            return spec
+            return fig
             
         except Exception as e:
             logger.error(f"Error creating line plot: {e}", exc_info=True)
             return None
     
-    def _create_scatterplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[Dict[str, Any]]:
-        """Create a scatter plot specification with optional color encoding."""
+    def _create_scatterplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[go.Figure]:
+        """Create a scatter plot with optional color encoding."""
         try:
             col_types = self._infer_column_types(df, columns)
             
@@ -448,32 +578,60 @@ class PlotGenerator:
             # Use grouping_column from parameter (set by generate_plot)
             group_col = grouping_column
             
-            # Build encoding dictionary
-            encoding = {
-                "x": alt.X(x_col, type="quantitative"),
-                "y": alt.Y(y_col, type="quantitative")
-            }
+            # Create figure
+            fig = go.Figure()
             
-            # Add color encoding if we have a grouping column
-            if group_col:
-                unique_count = df[group_col].nunique()
-                # Use color encoding for up to 10 categories
-                if unique_count <= 10:
-                    encoding["color"] = alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
+            if group_col and df[group_col].nunique() <= 10:
+                # Multiple scatter traces by group
+                unique_groups = sorted(df[group_col].unique())
+                for i, group_val in enumerate(unique_groups):
+                    group_data = df[df[group_col] == group_val]
+                    fig.add_trace(go.Scatter(
+                        x=group_data[x_col],
+                        y=group_data[y_col],
+                        mode='markers',
+                        name=str(group_val),
+                        marker=dict(
+                            color=EXECUTIVE_COLORS[i % len(EXECUTIVE_COLORS)],
+                            size=8,
+                            opacity=0.7
+                        ),
+                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{x_col}: %{{x}}<br>{y_col}: %{{y}}<extra></extra>'
+                    ))
+                layout = _get_executive_layout(
+                    title=f"{y_col} vs {x_col}",
+                    xaxis_title=x_col,
+                    yaxis_title=y_col
+                )
+                fig.update_layout(**layout)
+            else:
+                # Single scatter trace
+                fig.add_trace(go.Scatter(
+                    x=df[x_col],
+                    y=df[y_col],
+                    mode='markers',
+                    marker=dict(
+                        color=EXECUTIVE_COLORS[0],
+                        size=8,
+                        opacity=0.7
+                    ),
+                    hovertemplate=f'<b>{x_col}: %{{x}}</b><br>{y_col}: %{{y}}<extra></extra>'
+                ))
+                layout = _get_executive_layout(
+                    title=f"{y_col} vs {x_col}",
+                    xaxis_title=x_col,
+                    yaxis_title=y_col
+                )
+                fig.update_layout(**layout)
             
-            chart = alt.Chart(df).mark_circle().encode(**encoding).configure_axis(**PLOT_STYLE_CONFIG)
-            
-            spec = chart.to_dict()
-            spec = _make_json_serializable(spec)
-            spec = _ensure_schema_version(spec)
-            return spec
+            return fig
             
         except Exception as e:
             logger.error(f"Error creating scatter plot: {e}", exc_info=True)
             return None
     
-    def _create_histogram(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[Dict[str, Any]]:
-        """Create a histogram specification with support for grouping by categorical columns."""
+    def _create_histogram(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[go.Figure]:
+        """Create a histogram with support for grouping by categorical columns."""
         try:
             col_types = self._infer_column_types(df, columns)
             
@@ -502,40 +660,43 @@ class PlotGenerator:
                 logger.warning(f"Grouping column '{group_col}' not found in dataframe, ignoring grouping")
                 group_col = None
             
-            # If there's a categorical column, use it for grouping/color encoding
-            # This allows comparing distributions across categories (e.g., species)
-            if group_col:
-                # Count unique values to decide between color encoding and faceting
-                unique_count = df[group_col].nunique()
-                
-                if unique_count <= 5:
-                    # Use color encoding for small number of categories
-                    chart = alt.Chart(df).mark_bar(opacity=0.7).encode(
-                        x=alt.X(col, type="quantitative", bin=True),
-                        y=alt.Y("count()", title="Count"),
-                        color=alt.Color(group_col, type="nominal", legend=alt.Legend(title=group_col))
-                    )
-                else:
-                    # Use faceting for many categories
-                    chart = alt.Chart(df).mark_bar().encode(
-                        x=alt.X(col, type="quantitative", bin=True),
-                        y=alt.Y("count()", title="Count")
-                    ).facet(
-                        column=alt.Column(group_col, type="nominal", header=alt.Header(title=group_col))
-                    )
-            else:
-                # No grouping - simple histogram
-                chart = alt.Chart(df).mark_bar().encode(
-                    x=alt.X(col, type="quantitative", bin=True),
-                    y=alt.Y("count()", title="Count")
-                )
+            # Create figure
+            fig = go.Figure()
             
-            spec = chart.to_dict()
-            spec = _make_json_serializable(spec)
-            spec = _ensure_schema_version(spec)
-            return spec
+            if group_col and df[group_col].nunique() <= 5:
+                # Overlaid histograms by group
+                unique_groups = sorted(df[group_col].unique())
+                for i, group_val in enumerate(unique_groups):
+                    group_data = df[df[group_col] == group_val]
+                    fig.add_trace(go.Histogram(
+                        x=group_data[col],
+                        name=str(group_val),
+                        opacity=0.7,
+                        marker_color=EXECUTIVE_COLORS[i % len(EXECUTIVE_COLORS)],
+                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{col}: %{{x}}<br>Count: %{{y}}<extra></extra>'
+                    ))
+                layout = _get_executive_layout(
+                    title=f"Distribution of {col}",
+                    xaxis_title=col,
+                    yaxis_title="Count"
+                )
+                fig.update_layout(**layout, barmode='overlay')
+            else:
+                # Simple histogram
+                fig.add_trace(go.Histogram(
+                    x=df[col],
+                    marker_color=EXECUTIVE_COLORS[0],
+                    hovertemplate=f'<b>{col}: %{{x}}</b><br>Count: %{{y}}<extra></extra>'
+                ))
+                layout = _get_executive_layout(
+                    title=f"Distribution of {col}",
+                    xaxis_title=col,
+                    yaxis_title="Count"
+                )
+                fig.update_layout(**layout)
+            
+            return fig
             
         except Exception as e:
             logger.error(f"Error creating histogram: {e}", exc_info=True)
             return None
-

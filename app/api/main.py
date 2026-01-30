@@ -1,6 +1,7 @@
 """FastAPI application with chat and authentication endpoints."""
-from fastapi import FastAPI, Depends, HTTPException, status, Query
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 from datetime import datetime, timedelta
 import os
 import uuid
@@ -76,6 +77,32 @@ ensure_admin_user(db)
 orchestrator = OrchestratorAgent(
     instructions='Be helpful and concise.'
 )
+
+# Cancellation manager to track active requests per chat session
+class CancellationManager:
+    """Manages cancellation events for active chat requests."""
+    def __init__(self):
+        self._cancellation_events: dict[int, asyncio.Event] = {}
+    
+    def create_cancellation_event(self, chat_session_id: int) -> asyncio.Event:
+        """Create and store a cancellation event for a chat session."""
+        event = asyncio.Event()
+        self._cancellation_events[chat_session_id] = event
+        return event
+    
+    def cancel_request(self, chat_session_id: int) -> bool:
+        """Cancel an active request for a chat session. Returns True if request was active."""
+        if chat_session_id in self._cancellation_events:
+            self._cancellation_events[chat_session_id].set()
+            return True
+        return False
+    
+    def clear_cancellation_event(self, chat_session_id: int):
+        """Clear the cancellation event for a chat session."""
+        if chat_session_id in self._cancellation_events:
+            del self._cancellation_events[chat_session_id]
+
+cancellation_manager = CancellationManager()
 
 # Test log to verify logging is working
 logger.info("API application initialized - logging is configured")
@@ -185,8 +212,36 @@ async def chat(
         username=current_user.get("username")
     )
     
-    # Get response from orchestrator with message history
-    agent_response = await orchestrator.chat(user_message, message_history=message_history)
+    # Create cancellation event for this request
+    cancellation_event = cancellation_manager.create_cancellation_event(request.chat_session_id)
+    
+    try:
+        # Get response from orchestrator with message history and cancellation event
+        agent_response = await orchestrator.chat(
+            user_message, 
+            message_history=message_history,
+            cancellation_event=cancellation_event
+        )
+    except asyncio.CancelledError:
+        logger.info(f"Request cancelled for session {session_id}")
+        raise HTTPException(
+            status_code=499,  # Client Closed Request (non-standard but commonly used)
+            detail="Request cancelled by user"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        # If cancellation was requested, return appropriate error
+        if cancellation_event.is_set():
+            logger.info(f"Request cancelled for session {session_id}")
+            raise HTTPException(
+                status_code=499,  # Client Closed Request (non-standard but commonly used)
+                detail="Request cancelled by user"
+            )
+        raise
+    finally:
+        # Clear cancellation event
+        cancellation_manager.clear_cancellation_event(request.chat_session_id)
     
     # Save to database
     intent_type = agent_response.metadata.get("intent_type") if agent_response.metadata else None
@@ -419,6 +474,39 @@ async def get_chat_session(
         created_at=session["created_at"],
         updated_at=session["updated_at"]
     )
+
+
+@app.post("/api/chat/cancel")
+async def cancel_chat_request(
+    chat_session_id: int = Query(..., description="Chat session ID"),
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """
+    Cancel an active chat request for a specific chat session.
+    
+    Args:
+        chat_session_id: Chat session ID
+        current_user: Current authenticated user
+        
+    Returns:
+        Confirmation message
+    """
+    # Verify chat session belongs to user
+    chat_session = db.get_chat_session(chat_session_id)
+    if not chat_session or chat_session["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found"
+        )
+    
+    # Cancel the request if active
+    was_cancelled = cancellation_manager.cancel_request(chat_session_id)
+    
+    if was_cancelled:
+        logger.info(f"Request cancellation requested for chat session {chat_session_id}")
+        return {"message": "Request cancellation requested", "cancelled": True}
+    else:
+        return {"message": "No active request to cancel", "cancelled": False}
 
 
 @app.delete("/api/chat/sessions/{session_id}")

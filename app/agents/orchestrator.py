@@ -6,6 +6,7 @@ import mlflow
 import logging
 import hashlib
 import time
+import asyncio
 from pydantic_ai import (
     ModelMessage,
     UserPromptPart,
@@ -154,7 +155,10 @@ class OrchestratorAgent:
 
     @mlflow.trace(name="create_plan")
     async def _create_plan(
-        self, user_message: str, message_history: Optional[List[ModelMessage]] = None
+        self, 
+        user_message: str, 
+        message_history: Optional[List[ModelMessage]] = None,
+        cancellation_event: Optional[asyncio.Event] = None
     ) -> tuple[Union[str, ExecutionPlan], Any]:
         """
         Create an execution plan for the user's message.
@@ -162,16 +166,30 @@ class OrchestratorAgent:
         Args:
             user_message: The user's message
             message_history: Optional message history for context
+            cancellation_event: Optional cancellation event to check
 
         Returns:
             Tuple of (Union[str, ExecutionPlan], RunResult):
             - str: Clarification question when more information is needed
             - ExecutionPlan: Complete execution plan when enough information is available
         """
-        result = await self.planner_agent.run(
-            user_message, message_history=message_history
-        )
-        return result.output, result
+        # Check for cancellation before running planner
+        self._check_cancellation(cancellation_event)
+        
+        # Run planner agent with cancellation support
+        # The planner agent and its tools will check cancellation internally
+        try:
+            result = await self.planner_agent.run(
+                user_message, 
+                message_history=message_history,
+                cancellation_event=cancellation_event
+            )
+            # Check one more time after completion
+            self._check_cancellation(cancellation_event)
+            return result.output, result
+        except asyncio.CancelledError:
+            logger.info("Planner agent execution cancelled")
+            raise
 
     @mlflow.trace(name="synthesize_response")
     async def _synthesize_response(
@@ -270,6 +288,7 @@ class OrchestratorAgent:
         self,
         user_input: UserMessage,
         current_message_history: List[ModelMessage],
+        cancellation_event: Optional[asyncio.Event] = None,
     ) -> tuple[Union[str, ExecutionPlan], Any]:
         """
         Create an execution plan for the user's message with full message history.
@@ -283,11 +302,19 @@ class OrchestratorAgent:
             - str: Clarification question when more information is needed
             - ExecutionPlan: Complete execution plan when enough information is available
         """
+        # Check for cancellation before planning
+        self._check_cancellation(cancellation_event)
+        
         # Create execution plan with full message history
         # The message history includes all previous messages, including any clarification Q&A
         plan_or_clarification, plan_result = await self._create_plan(
-            user_input.content, message_history=current_message_history
+            user_input.content, 
+            message_history=current_message_history,
+            cancellation_event=cancellation_event
         )
+        
+        # Check for cancellation after planning
+        self._check_cancellation(cancellation_event)
         
         # If it's an ExecutionPlan, tag the intent type
         if isinstance(plan_or_clarification, ExecutionPlan):
@@ -302,6 +329,7 @@ class OrchestratorAgent:
         user_message_content: str,
         session_id: str,
         current_message_history: List[ModelMessage],
+        cancellation_event: Optional[asyncio.Event] = None,
     ) -> Optional[QueryAgentOutput]:
         """
         Execute the plan to get data (cached or new query).
@@ -315,6 +343,9 @@ class OrchestratorAgent:
         Returns:
             QueryAgentOutput with query results, or None if no data needed
         """
+        # Check for cancellation before executing plan
+        self._check_cancellation(cancellation_event)
+        
         # Execute plan: get data (cached or new query)
         # For database_query intents, always get data
         # For general_question intents, get data if plot is required
@@ -344,11 +375,17 @@ class OrchestratorAgent:
                     plan.use_cached_data = False
 
             if not plan.use_cached_data:
+                # Check for cancellation before executing query
+                self._check_cancellation(cancellation_event)
+                
                 # Execute new database query
                 # Always use DatabaseQueryAgent to generate and execute query
                 agent_output, _ = await self.router.route_to_database_query(
                     user_message_content, message_history=current_message_history
                 )
+                
+                # Check for cancellation after query execution
+                self._check_cancellation(cancellation_event)
 
                 # Store query result in cache
                 if agent_output and agent_output.query_result.success:
@@ -421,11 +458,17 @@ class OrchestratorAgent:
 
         return response
 
+    def _check_cancellation(self, cancellation_event: Optional[asyncio.Event] = None):
+        """Check if cancellation was requested and raise CancelledError if so."""
+        if cancellation_event and cancellation_event.is_set():
+            raise asyncio.CancelledError("Request cancelled by user")
+
     @mlflow.trace(name="chat")
     async def chat(
         self,
         user_input: UserMessage,
         message_history: Optional[List[ModelMessage]] = None,
+        cancellation_event: Optional[asyncio.Event] = None,
     ) -> AgentResponse:
         """
         Main chat interface implementing the full orchestration flow.
@@ -442,14 +485,21 @@ class OrchestratorAgent:
         Args:
             user_input: The user's message as a UserMessage model
             message_history: Optional message history for conversation context
+            cancellation_event: Optional asyncio.Event to check for cancellation requests
 
         Returns:
             The agent's response as an AgentResponse model
         """
+        # Check for cancellation before starting
+        self._check_cancellation(cancellation_event)
+        
         # Prepare session
         session_id, session_state, current_message_history = (
             await self._prepare_session_and_history(user_input, message_history)
         )
+
+        # Check for cancellation after session prep
+        self._check_cancellation(cancellation_event)
 
         # Add user message to history BEFORE running planner
         # This ensures the planner sees the full conversation context, including
@@ -463,8 +513,11 @@ class OrchestratorAgent:
 
         # Create execution plan with full message history
         plan_or_clarification, _ = await self._create_plan_with_history(
-            user_input, current_message_history
+            user_input, current_message_history, cancellation_event
         )
+        
+        # Check for cancellation after planning
+        self._check_cancellation(cancellation_event)
 
         # Check if planner returned a clarification string
         if isinstance(plan_or_clarification, str):
@@ -484,8 +537,11 @@ class OrchestratorAgent:
 
         # Execute plan
         agent_output = await self._execute_plan(
-            plan, user_input.content, session_id, current_message_history
+            plan, user_input.content, session_id, current_message_history, cancellation_event
         )
+        
+        # Check for cancellation after plan execution
+        self._check_cancellation(cancellation_event)
 
         # Check if DatabaseQueryAgent needs clarification
         if agent_output is not None and agent_output.requires_clarification:
@@ -500,6 +556,9 @@ class OrchestratorAgent:
                 user_input, intent_classification, session_id, session_state
             )
 
+        # Check for cancellation before finalizing
+        self._check_cancellation(cancellation_event)
+        
         # Finalize response
         return await self._finalize_response(
             user_input.content,

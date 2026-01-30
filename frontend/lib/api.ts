@@ -104,13 +104,14 @@ class ApiClient {
     }
   }
 
-  async chat(message: string, chatSessionId: number): Promise<{ response: string }> {
+  async chat(message: string, chatSessionId: number, signal?: AbortSignal): Promise<{ response: string }> {
     return this.request<{ response: string }>('/api/chat', {
       method: 'POST',
       body: JSON.stringify({
         message,
         chat_session_id: chatSessionId,
       }),
+      signal,
     });
   }
 
@@ -149,6 +150,15 @@ class ApiClient {
       `/api/chat/sessions/${sessionId}`,
       {
         method: 'DELETE',
+      }
+    );
+  }
+
+  async cancelChatRequest(chatSessionId: number): Promise<{ message: string; cancelled: boolean }> {
+    return this.request<{ message: string; cancelled: boolean }>(
+      `/api/chat/cancel?chat_session_id=${chatSessionId}`,
+      {
+        method: 'POST',
       }
     );
   }
