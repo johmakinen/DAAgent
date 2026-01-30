@@ -109,8 +109,8 @@ class SynthesizerAgent:
                 )
                 
                 if plot_spec_dict:
-                    # Extract plot metadata for text synchronization
-                    plot_metadata = self.plot_generator.extract_plot_metadata(plot_spec_dict)
+                    # Extract plot metadata for text synchronization (pass plot_type to ensure correct type)
+                    plot_metadata = self.plot_generator.extract_plot_metadata(plot_spec_dict, plot_type=plot_type)
                     logger.info(f"Successfully generated plot_spec: type={plot_type}, metadata={plot_metadata is not None}")
                 else:
                     logger.warning("Plot generation returned None")
@@ -155,7 +155,7 @@ class SynthesizerAgent:
                     
                     if plot_spec_dict:
                         # Extract plot metadata (for future use, but text already generated)
-                        plot_metadata = self.plot_generator.extract_plot_metadata(plot_spec_dict)
+                        plot_metadata = self.plot_generator.extract_plot_metadata(plot_spec_dict, plot_type=plot_type)
                         logger.info(f"Successfully generated plot_spec: type={plot_type}")
                 except Exception as e:
                     logger.warning(f"Failed to generate plot: {e}", exc_info=True)

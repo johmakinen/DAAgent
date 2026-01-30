@@ -86,11 +86,13 @@ class ResponseFormatter:
                             context += f"Query result data (showing first {SAMPLE_SIZE} of {row_count} rows):\n"
                             context += json.dumps(sample_data, indent=2)
                             context += f"\n\nNote: Full dataset ({row_count} rows) is available for plot generation if needed."
+                            context += f"\n\nIMPORTANT: Use the actual numeric values from the query result data above to calculate specific changes, percentages, differences, and other quantitative metrics in your analysis. The data contains all the values you need for precise calculations."
                         else:
                             # Include all data for smaller result sets
                             context += "Query result data:\n"
                             import json
                             context += json.dumps(query_output.query_result.data, indent=2)
+                            context += "\n\nIMPORTANT: Use the actual numeric values from the query result data above to calculate specific changes, percentages, differences, and other quantitative metrics in your analysis. The data contains all the values you need for precise calculations."
             else:
                 context += f"Query error: {query_output.query_result.error}"
         else:
@@ -155,7 +157,10 @@ class ResponseFormatter:
                 groups_str = ", ".join(str(g) for g in groups)
                 metadata_section += f"- Groups: {groups_str}\n"
         
+        metadata_section += "\n\n**MANDATORY ANALYSIS REQUIRED**: A plot has been generated and is visible to the user. You MUST provide a comprehensive analysis of the plot data in your response. This is not optional.\n"
         metadata_section += "\nWhen describing the plot in your response, reference these exact values from the plot configuration above."
+        metadata_section += "\n\nCRITICAL: The query result data (provided earlier in the context) contains the actual numeric values. Use these values to calculate and report specific changes, percentages, differences, ranges, and other quantitative metrics. Do not use vague descriptions - always include exact numbers from the data."
+        metadata_section += "\n\nYour analysis MUST include specific numeric values from the data. Do not skip the analysis - it is required."
         
         return context + metadata_section
 

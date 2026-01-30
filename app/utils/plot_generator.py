@@ -298,12 +298,14 @@ class PlotGenerator:
             return None
     
     @staticmethod
-    def extract_plot_metadata(plot_spec_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def extract_plot_metadata(plot_spec_dict: Dict[str, Any], plot_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Extract key metadata from a Plotly figure dictionary.
         
         Args:
             plot_spec_dict: Plotly figure dictionary (from fig.to_dict())
+            plot_type: Original plot type used to generate the plot ('bar', 'line', 'scatter', 'histogram')
+                      If provided, this takes precedence over trace type inference
             
         Returns:
             Dictionary with plot metadata, or None if extraction fails
@@ -353,10 +355,29 @@ class PlotGenerator:
             if not data:
                 return metadata
             
-            # Determine plot type from first trace
+            # Extract trace information for use in both plot type determination and metadata extraction
             first_trace = data[0]
             trace_type = first_trace.get("type", "")
-            metadata["plot_type"] = trace_type
+            mode = first_trace.get("mode", "")
+            
+            # Determine plot type - use provided plot_type if available, otherwise infer from trace
+            if plot_type:
+                metadata["plot_type"] = plot_type
+            else:
+                # Infer from trace type (but note: line plots use Scatter traces)
+                # Map Plotly trace types to our plot types
+                if trace_type == "histogram":
+                    metadata["plot_type"] = "histogram"
+                elif trace_type == "bar":
+                    metadata["plot_type"] = "bar"
+                elif trace_type == "scatter":
+                    # Distinguish between line plots (lines+markers) and scatter plots (markers only)
+                    if "lines" in mode or "line" in mode:
+                        metadata["plot_type"] = "line"
+                    else:
+                        metadata["plot_type"] = "scatter"
+                else:
+                    metadata["plot_type"] = trace_type
             
             # Extract histogram-specific metadata
             if trace_type == "histogram":
