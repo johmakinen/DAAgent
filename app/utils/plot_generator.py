@@ -271,13 +271,13 @@ class PlotGenerator:
             # Generate plot based on type
             fig = None
             if plot_type == "bar":
-                fig = self._create_barplot(df, columns, grouping_column, plot_config)
+                fig = self._create_barplot(df, columns, grouping_column, plot_config, question)
             elif plot_type == "line":
-                fig = self._create_lineplot(df, columns, grouping_column, plot_config)
+                fig = self._create_lineplot(df, columns, grouping_column, plot_config, question)
             elif plot_type == "scatter":
-                fig = self._create_scatterplot(df, columns, grouping_column, plot_config)
+                fig = self._create_scatterplot(df, columns, grouping_column, plot_config, question)
             elif plot_type == "histogram":
-                fig = self._create_histogram(df, columns, grouping_column, plot_config)
+                fig = self._create_histogram(df, columns, grouping_column, plot_config, question)
             else:
                 logger.warning(f"Unknown plot type: {plot_type}")
                 return None
@@ -320,6 +320,64 @@ class PlotGenerator:
                 types[col] = "nominal"
         
         return types
+    
+    def _infer_label_from_question(self, column_name: str, question: str, axis: str = "y") -> str:
+        """
+        Infer a human-readable label from the question and column name.
+        
+        Args:
+            column_name: The column name to create a label for
+            question: The user's question
+            axis: 'x' or 'y' to help infer context
+        
+        Returns:
+            Human-readable label
+        """
+        question_lower = question.lower()
+        col_lower = column_name.lower()
+        
+        # Common mappings
+        label_mappings = {
+            'year': 'Year',
+            'time': 'Time',
+            'date': 'Date',
+            'income': 'Income',
+            'population': 'Population',
+            'price': 'Price',
+            'value': None,  # Will infer from question context
+            'count': 'Count',
+            'amount': 'Amount',
+            'size': 'Size',
+            'area': 'Area',
+            'postal_code': 'Postal Code',
+            'postal_code_area': 'Postal Code Area',
+        }
+        
+        # Check direct mappings first
+        for key, label in label_mappings.items():
+            if key in col_lower:
+                if label:
+                    return label
+        
+        # For generic 'value' column, try to infer from question
+        if 'value' in col_lower:
+            if 'income' in question_lower:
+                return 'Income'
+            elif 'population' in question_lower:
+                return 'Population'
+            elif 'price' in question_lower:
+                return 'Price'
+            elif 'amount' in question_lower:
+                return 'Amount'
+            # Default for value
+            return 'Value'
+        
+        # For time-related columns
+        if any(term in col_lower for term in ['year', 'time', 'date', 'month', 'day']):
+            return 'Year' if 'year' in col_lower else 'Time'
+        
+        # Capitalize and format column name as fallback
+        return column_name.replace('_', ' ').title()
     
     def _find_grouping_column(
         self, 
@@ -375,7 +433,7 @@ class PlotGenerator:
         # If no hint or no match, use first categorical column
         return categorical_cols[0]
     
-    def _create_barplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[go.Figure]:
+    def _create_barplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None, question: str = "") -> Optional[go.Figure]:
         """Create a bar plot with optional color encoding."""
         try:
             col_types = self._infer_column_types(df, columns)
@@ -408,22 +466,41 @@ class PlotGenerator:
             # Use grouping_column from parameter (set by generate_plot)
             group_col = grouping_column
             
+            # Determine labels: use plot_config labels if available, otherwise infer from question
+            x_label = None
+            y_label = None
+            plot_title = None
+            
+            if plot_config:
+                x_label = plot_config.x_label
+                y_label = plot_config.y_label
+                plot_title = plot_config.title
+            
             # Determine y-axis values
             if y_col is None:
                 # Count by x_col
                 y_values = df.groupby(x_col).size().reset_index(name='count')
                 y_col_name = 'count'
-                y_title = "Count"
+                if not y_label:
+                    y_label = "Count"
             else:
                 # Aggregate by x_col
                 if group_col and group_col != x_col:
                     y_values = df.groupby([x_col, group_col])[y_col].mean().reset_index()
                     y_col_name = y_col
-                    y_title = f"Mean {y_col}"
+                    if not y_label:
+                        y_label = self._infer_label_from_question(y_col, question, axis="y")
                 else:
                     y_values = df.groupby(x_col)[y_col].mean().reset_index()
                     y_col_name = y_col
-                    y_title = f"Mean {y_col}"
+                    if not y_label:
+                        y_label = self._infer_label_from_question(y_col, question, axis="y")
+            
+            # Fallback to inference if labels not provided
+            if not x_label:
+                x_label = self._infer_label_from_question(x_col, question, axis="x")
+            if not plot_title:
+                plot_title = f"{y_label} by {x_label}"
             
             # Create figure
             if group_col and group_col != x_col and y_values[group_col].nunique() <= 10:
@@ -437,12 +514,12 @@ class PlotGenerator:
                         y=group_data[y_col_name],
                         name=str(group_val),
                         marker_color=EXECUTIVE_COLORS[i % len(EXECUTIVE_COLORS)],
-                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{x_col}: %{{x}}<br>{y_title}: %{{y}}<extra></extra>'
+                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{x_label}: %{{x}}<br>{y_label}: %{{y}}<extra></extra>'
                     ))
                 layout = _get_executive_layout(
-                    title=f"{y_title} by {x_col}",
-                    xaxis_title=x_col,
-                    yaxis_title=y_title
+                    title=plot_title,
+                    xaxis_title=x_label,
+                    yaxis_title=y_label
                 )
                 fig.update_layout(**layout)
             else:
@@ -452,13 +529,13 @@ class PlotGenerator:
                         x=y_values[x_col],
                         y=y_values[y_col_name],
                         marker_color=EXECUTIVE_COLORS[0],
-                        hovertemplate=f'<b>{x_col}: %{{x}}</b><br>{y_title}: %{{y}}<extra></extra>'
+                        hovertemplate=f'<b>{x_label}: %{{x}}</b><br>{y_label}: %{{y}}<extra></extra>'
                     )
                 ])
                 layout = _get_executive_layout(
-                    title=f"{y_title} by {x_col}",
-                    xaxis_title=x_col,
-                    yaxis_title=y_title
+                    title=plot_title,
+                    xaxis_title=x_label,
+                    yaxis_title=y_label
                 )
                 fig.update_layout(**layout)
             
@@ -468,7 +545,7 @@ class PlotGenerator:
             logger.error(f"Error creating bar plot: {e}", exc_info=True)
             return None
     
-    def _create_lineplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[go.Figure]:
+    def _create_lineplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None, question: str = "") -> Optional[go.Figure]:
         """Create a line plot with optional color encoding for multiple series."""
         try:
             col_types = self._infer_column_types(df, columns)
@@ -505,6 +582,24 @@ class PlotGenerator:
                     logger.warning("Not enough columns for line plot")
                     return None
             
+            # Determine labels: use plot_config labels if available, otherwise infer from question
+            x_label = None
+            y_label = None
+            plot_title = None
+            
+            if plot_config:
+                x_label = plot_config.x_label
+                y_label = plot_config.y_label
+                plot_title = plot_config.title
+            
+            # Fallback to inference if labels not provided
+            if not x_label:
+                x_label = self._infer_label_from_question(x_col, question, axis="x")
+            if not y_label:
+                y_label = self._infer_label_from_question(y_col, question, axis="y")
+            if not plot_title:
+                plot_title = f"{y_label} over {x_label}"
+            
             # Use grouping_column from parameter (set by generate_plot)
             group_col = grouping_column
             
@@ -523,12 +618,12 @@ class PlotGenerator:
                         name=str(group_val),
                         line=dict(color=EXECUTIVE_COLORS[i % len(EXECUTIVE_COLORS)], width=2.5),
                         marker=dict(size=6),
-                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{x_col}: %{{x}}<br>{y_col}: %{{y}}<extra></extra>'
+                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{x_label}: %{{x}}<br>{y_label}: %{{y}}<extra></extra>'
                     ))
                 layout = _get_executive_layout(
-                    title=f"{y_col} over {x_col}",
-                    xaxis_title=x_col,
-                    yaxis_title=y_col
+                    title=plot_title,
+                    xaxis_title=x_label,
+                    yaxis_title=y_label
                 )
                 fig.update_layout(**layout)
             else:
@@ -540,12 +635,12 @@ class PlotGenerator:
                     mode='lines+markers',
                     line=dict(color=EXECUTIVE_COLORS[0], width=2.5),
                     marker=dict(size=6),
-                    hovertemplate=f'<b>{x_col}: %{{x}}</b><br>{y_col}: %{{y}}<extra></extra>'
+                    hovertemplate=f'<b>{x_label}: %{{x}}</b><br>{y_label}: %{{y}}<extra></extra>'
                 ))
                 layout = _get_executive_layout(
-                    title=f"{y_col} over {x_col}",
-                    xaxis_title=x_col,
-                    yaxis_title=y_col
+                    title=plot_title,
+                    xaxis_title=x_label,
+                    yaxis_title=y_label
                 )
                 fig.update_layout(**layout)
             
@@ -555,7 +650,7 @@ class PlotGenerator:
             logger.error(f"Error creating line plot: {e}", exc_info=True)
             return None
     
-    def _create_scatterplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[go.Figure]:
+    def _create_scatterplot(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None, question: str = "") -> Optional[go.Figure]:
         """Create a scatter plot with optional color encoding."""
         try:
             col_types = self._infer_column_types(df, columns)
@@ -587,6 +682,24 @@ class PlotGenerator:
             # Use grouping_column from parameter (set by generate_plot)
             group_col = grouping_column
             
+            # Determine labels: use plot_config labels if available, otherwise infer from question
+            x_label = None
+            y_label = None
+            plot_title = None
+            
+            if plot_config:
+                x_label = plot_config.x_label
+                y_label = plot_config.y_label
+                plot_title = plot_config.title
+            
+            # Fallback to inference if labels not provided
+            if not x_label:
+                x_label = self._infer_label_from_question(x_col, question, axis="x")
+            if not y_label:
+                y_label = self._infer_label_from_question(y_col, question, axis="y")
+            if not plot_title:
+                plot_title = f"{y_label} vs {x_label}"
+            
             # Create figure
             fig = go.Figure()
             
@@ -605,12 +718,12 @@ class PlotGenerator:
                             size=8,
                             opacity=0.7
                         ),
-                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{x_col}: %{{x}}<br>{y_col}: %{{y}}<extra></extra>'
+                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{x_label}: %{{x}}<br>{y_label}: %{{y}}<extra></extra>'
                     ))
                 layout = _get_executive_layout(
-                    title=f"{y_col} vs {x_col}",
-                    xaxis_title=x_col,
-                    yaxis_title=y_col
+                    title=plot_title,
+                    xaxis_title=x_label,
+                    yaxis_title=y_label
                 )
                 fig.update_layout(**layout)
             else:
@@ -624,12 +737,12 @@ class PlotGenerator:
                         size=8,
                         opacity=0.7
                     ),
-                    hovertemplate=f'<b>{x_col}: %{{x}}</b><br>{y_col}: %{{y}}<extra></extra>'
+                    hovertemplate=f'<b>{x_label}: %{{x}}</b><br>{y_label}: %{{y}}<extra></extra>'
                 ))
                 layout = _get_executive_layout(
-                    title=f"{y_col} vs {x_col}",
-                    xaxis_title=x_col,
-                    yaxis_title=y_col
+                    title=plot_title,
+                    xaxis_title=x_label,
+                    yaxis_title=y_label
                 )
                 fig.update_layout(**layout)
             
@@ -639,7 +752,7 @@ class PlotGenerator:
             logger.error(f"Error creating scatter plot: {e}", exc_info=True)
             return None
     
-    def _create_histogram(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None) -> Optional[go.Figure]:
+    def _create_histogram(self, df: pd.DataFrame, columns: List[str], grouping_column: Optional[str] = None, plot_config: Optional[PlotConfig] = None, question: str = "") -> Optional[go.Figure]:
         """Create a histogram with support for grouping by categorical columns."""
         try:
             col_types = self._infer_column_types(df, columns)
@@ -669,6 +782,23 @@ class PlotGenerator:
                 logger.warning(f"Grouping column '{group_col}' not found in dataframe, ignoring grouping")
                 group_col = None
             
+            # Determine labels: use plot_config labels if available, otherwise infer from question
+            x_label = None
+            y_label = "Count"
+            plot_title = None
+            
+            if plot_config:
+                x_label = plot_config.x_label
+                if plot_config.y_label:
+                    y_label = plot_config.y_label
+                plot_title = plot_config.title
+            
+            # Fallback to inference if labels not provided
+            if not x_label:
+                x_label = self._infer_label_from_question(col, question, axis="x")
+            if not plot_title:
+                plot_title = f"Distribution of {x_label}"
+            
             # Create figure
             fig = go.Figure()
             
@@ -682,12 +812,12 @@ class PlotGenerator:
                         name=str(group_val),
                         opacity=0.7,
                         marker_color=EXECUTIVE_COLORS[i % len(EXECUTIVE_COLORS)],
-                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{col}: %{{x}}<br>Count: %{{y}}<extra></extra>'
+                        hovertemplate=f'<b>{group_col}: {group_val}</b><br>{x_label}: %{{x}}<br>{y_label}: %{{y}}<extra></extra>'
                     ))
                 layout = _get_executive_layout(
-                    title=f"Distribution of {col}",
-                    xaxis_title=col,
-                    yaxis_title="Count"
+                    title=plot_title,
+                    xaxis_title=x_label,
+                    yaxis_title=y_label
                 )
                 fig.update_layout(**layout, barmode='overlay')
             else:
@@ -695,12 +825,12 @@ class PlotGenerator:
                 fig.add_trace(go.Histogram(
                     x=df[col],
                     marker_color=EXECUTIVE_COLORS[0],
-                    hovertemplate=f'<b>{col}: %{{x}}</b><br>Count: %{{y}}<extra></extra>'
+                    hovertemplate=f'<b>{x_label}: %{{x}}</b><br>{y_label}: %{{y}}<extra></extra>'
                 ))
                 layout = _get_executive_layout(
-                    title=f"Distribution of {col}",
-                    xaxis_title=col,
-                    yaxis_title="Count"
+                    title=plot_title,
+                    xaxis_title=x_label,
+                    yaxis_title=y_label
                 )
                 fig.update_layout(**layout)
             

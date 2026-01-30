@@ -23,6 +23,9 @@ class PlotConfig(BaseModel):
     y_column: Optional[str] = Field(None, description="Column name for y-axis")
     grouping_column: Optional[str] = Field(None, description="Column name to use for grouping/color encoding")
     columns: Optional[List[str]] = Field(None, description="List of columns to include in the plot")
+    x_label: Optional[str] = Field(None, description="Human-readable label for x-axis (e.g., 'Year', 'Income')")
+    y_label: Optional[str] = Field(None, description="Human-readable label for y-axis (e.g., 'Income', 'Count')")
+    title: Optional[str] = Field(None, description="Human-readable plot title (e.g., 'Income Trend Over Time')")
     reasoning: str = Field(..., description="Brief reasoning for the plot configuration")
 
 

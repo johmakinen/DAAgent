@@ -80,8 +80,10 @@ Analyze the user's question and determine the appropriate plot configuration. Co
 2. Whether grouping/color encoding is needed (e.g., "for the three species", "by species", "across categories")
 3. Which column should be used for grouping if needed
 4. Appropriate x and y column assignments based on the plot type
+5. CRITICAL: Infer meaningful labels from the question - extract what the data represents (e.g., if question mentions "income", use "Income" as y_label, not the column name "value")
 
-Match column names mentioned in the question to the available columns, handling variations like plurals, articles, and partial matches."""
+Match column names mentioned in the question to the available columns, handling variations like plurals, articles, and partial matches.
+For labels, use human-readable terms from the question context, not generic column names."""
         
         logger.info("LLM Call: PlotPlanningAgent - determining plot configuration")
         deps = EmptyDeps()
