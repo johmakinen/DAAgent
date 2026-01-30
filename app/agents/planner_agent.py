@@ -2,7 +2,7 @@
 import mlflow
 import logging
 import asyncio
-from pydantic_ai import Agent, RunContext, ModelMessage, ModelRequest, ModelResponse, UserPromptPart, TextPart
+from pydantic_ai import Agent, RunContext, ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
 from typing import Optional, List, Union
 from pydantic import BaseModel, ConfigDict
@@ -13,41 +13,6 @@ from app.tools.schema_tool import SchemaTool
 mlflow.pydantic_ai.autolog()
 
 logger = logging.getLogger(__name__)
-
-
-def filter_tool_calls_from_history(messages: List[ModelMessage]) -> List[ModelMessage]:
-    """
-    Filter message history to only include user messages and assistant text responses.
-    This prevents the planner from seeing previous tool calls which can cause it to
-    repeatedly call tools unnecessarily.
-    
-    Args:
-        messages: Full message history
-        
-    Returns:
-        Filtered message history with only user/assistant text messages
-    """
-    filtered = []
-    for msg in messages:
-        # Only keep ModelRequest (user messages) and ModelResponse (assistant responses)
-        # Filter out any messages that contain tool calls or tool results
-        if isinstance(msg, ModelRequest):
-            # Check if this request only contains user prompt parts (no tool calls)
-            has_only_user_parts = all(
-                isinstance(part, UserPromptPart) for part in msg.parts
-            )
-            if has_only_user_parts:
-                filtered.append(msg)
-        elif isinstance(msg, ModelResponse):
-            # Check if this response only contains text parts (no tool results)
-            has_only_text_parts = all(
-                isinstance(part, TextPart) for part in msg.parts
-            )
-            if has_only_text_parts:
-                filtered.append(msg)
-        # Skip any other message types (tool calls, tool results, etc.)
-    
-    return filtered
 
 
 class PlannerDeps(BaseModel):
@@ -92,13 +57,16 @@ class PlannerAgent:
         )
         
         # Use Union type: output is either a string (clarification question) or ExecutionPlan
+        # NOTE: Removed history_processors to fix infinite loop issue.
+        # The filter was removing tool calls/results from the CURRENT run, preventing the LLM
+        # from seeing that it already called get_schema_summary, causing infinite loops.
+        # The LLM needs to see its own tool calls within a single run to avoid repeating them.
         self.agent = Agent(
             model,
             instructions=prompt_template,
             output_type=Union[str, ExecutionPlan],
             deps_type=PlannerDeps,
-            name="planner-agent",
-            history_processors=[filter_tool_calls_from_history]
+            name="planner-agent"
         )
         
         # Register schema summary tool
