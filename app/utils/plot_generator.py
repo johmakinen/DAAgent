@@ -297,6 +297,116 @@ class PlotGenerator:
             logger.error(f"Error generating plot: {e}", exc_info=True)
             return None
     
+    @staticmethod
+    def extract_plot_metadata(plot_spec_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Extract key metadata from a Plotly figure dictionary.
+        
+        Args:
+            plot_spec_dict: Plotly figure dictionary (from fig.to_dict())
+            
+        Returns:
+            Dictionary with plot metadata, or None if extraction fails
+        """
+        try:
+            metadata = {
+                "plot_type": None,
+                "x_axis_label": None,
+                "y_axis_label": None,
+                "title": None,
+                "bin_width": None,
+                "bin_start": None,
+                "bin_end": None,
+                "num_bins": None,
+                "grouping_column": None,
+                "groups": None
+            }
+            
+            # Extract layout information
+            layout = plot_spec_dict.get("layout", {})
+            
+            # Extract title
+            title_info = layout.get("title", {})
+            if isinstance(title_info, dict):
+                metadata["title"] = title_info.get("text", "")
+            elif isinstance(title_info, str):
+                metadata["title"] = title_info
+            
+            # Extract axis labels
+            xaxis = layout.get("xaxis", {})
+            yaxis = layout.get("yaxis", {})
+            
+            xaxis_title = xaxis.get("title", {})
+            if isinstance(xaxis_title, dict):
+                metadata["x_axis_label"] = xaxis_title.get("text", "")
+            elif isinstance(xaxis_title, str):
+                metadata["x_axis_label"] = xaxis_title
+            
+            yaxis_title = yaxis.get("title", {})
+            if isinstance(yaxis_title, dict):
+                metadata["y_axis_label"] = yaxis_title.get("text", "")
+            elif isinstance(yaxis_title, str):
+                metadata["y_axis_label"] = yaxis_title
+            
+            # Extract data traces
+            data = plot_spec_dict.get("data", [])
+            if not data:
+                return metadata
+            
+            # Determine plot type from first trace
+            first_trace = data[0]
+            trace_type = first_trace.get("type", "")
+            metadata["plot_type"] = trace_type
+            
+            # Extract histogram-specific metadata
+            if trace_type == "histogram":
+                xbins = first_trace.get("xbins", {})
+                if isinstance(xbins, dict):
+                    metadata["bin_start"] = xbins.get("start")
+                    metadata["bin_end"] = xbins.get("end")
+                    bin_size = xbins.get("size")
+                    if bin_size is not None:
+                        metadata["bin_width"] = bin_size
+                    else:
+                        # Calculate bin width from start, end, and nbinsx if available
+                        nbinsx = first_trace.get("nbinsx")
+                        if nbinsx and metadata["bin_start"] is not None and metadata["bin_end"] is not None:
+                            metadata["num_bins"] = nbinsx
+                            if nbinsx > 0:
+                                metadata["bin_width"] = (metadata["bin_end"] - metadata["bin_start"]) / nbinsx
+                        elif metadata["bin_start"] is not None and metadata["bin_end"] is not None:
+                            # Try to infer from data range
+                            x_data = first_trace.get("x", [])
+                            if x_data:
+                                import numpy as np
+                                if hasattr(x_data, '__iter__') and not isinstance(x_data, str):
+                                    x_array = np.array(list(x_data))
+                                    if len(x_array) > 0:
+                                        data_min = float(np.min(x_array))
+                                        data_max = float(np.max(x_array))
+                                        nbinsx = first_trace.get("nbinsx", 30)
+                                        if nbinsx > 0:
+                                            metadata["bin_width"] = (data_max - data_min) / nbinsx
+                                            metadata["num_bins"] = nbinsx
+            
+            # Extract grouping information (if multiple traces with names)
+            if len(data) > 1:
+                # Check if traces have names (indicating grouping)
+                trace_names = [trace.get("name") for trace in data if trace.get("name")]
+                if trace_names:
+                    metadata["groups"] = trace_names
+                    # Try to infer grouping column from legend or trace metadata
+                    # This is best-effort since Plotly doesn't always store this
+                    legend = layout.get("legend", {})
+                    if legend:
+                        metadata["grouping_column"] = "grouped"  # Generic indicator
+            
+            return metadata
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract plot metadata: {e}", exc_info=True)
+            return None
+    
     def _infer_column_types(self, df: pd.DataFrame, columns: List[str]) -> Dict[str, str]:
         """
         Infer column types (numeric vs categorical).

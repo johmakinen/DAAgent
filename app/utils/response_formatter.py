@@ -1,5 +1,5 @@
 """Response formatting utilities for agent outputs."""
-from typing import Literal, Optional
+from typing import Literal, Optional, Dict, Any
 from app.core.models import QueryAgentOutput, ExecutionPlan
 
 
@@ -72,7 +72,8 @@ class ResponseFormatter:
                                 col_info.append(f"{col} (unknown)")
                         
                         row_count = query_output.query_result.row_count
-                        context += f"Query returned {row_count} row(s) with columns: {', '.join(col_info)}\n\n"
+                        context += f"Query returned {row_count} row(s) with columns: {', '.join(col_info)}\n"
+                        context += f"IMPORTANT: When presenting data in a table, show maximum 10 rows. If there are more than 10 rows, show only the first 10 and include a note: 'Note: Showing first 10 rows of {row_count} total rows.'\n\n"
                         
                         # Optimize data size: for large result sets, include only sample rows
                         MAX_ROWS_TO_INCLUDE = 50
@@ -97,4 +98,64 @@ class ResponseFormatter:
             context = f"User question: {user_message}"
         
         return context
+    
+    @staticmethod
+    def add_plot_metadata_to_context(context: str, plot_metadata: Dict[str, Any]) -> str:
+        """
+        Add plot metadata to the synthesizer context.
+        
+        Args:
+            context: Existing context string
+            plot_metadata: Dictionary with plot metadata from extract_plot_metadata()
+            
+        Returns:
+            Updated context string with plot metadata included
+        """
+        if not plot_metadata:
+            return context
+        
+        metadata_section = "\n\nPlot Configuration:\n"
+        
+        plot_type = plot_metadata.get("plot_type")
+        if plot_type:
+            metadata_section += f"- Type: {plot_type}\n"
+        
+        x_label = plot_metadata.get("x_axis_label")
+        if x_label:
+            metadata_section += f"- X-axis label: \"{x_label}\"\n"
+        
+        y_label = plot_metadata.get("y_axis_label")
+        if y_label:
+            metadata_section += f"- Y-axis label: \"{y_label}\"\n"
+        
+        title = plot_metadata.get("title")
+        if title:
+            metadata_section += f"- Title: \"{title}\"\n"
+        
+        # Add histogram-specific metadata
+        if plot_type == "histogram":
+            bin_width = plot_metadata.get("bin_width")
+            if bin_width is not None:
+                metadata_section += f"- Bin width: {bin_width}\n"
+            num_bins = plot_metadata.get("num_bins")
+            if num_bins is not None:
+                metadata_section += f"- Number of bins: {num_bins}\n"
+            bin_start = plot_metadata.get("bin_start")
+            bin_end = plot_metadata.get("bin_end")
+            if bin_start is not None and bin_end is not None:
+                metadata_section += f"- Bin range: {bin_start} to {bin_end}\n"
+        
+        # Add grouping information if available
+        grouping_column = plot_metadata.get("grouping_column")
+        groups = plot_metadata.get("groups")
+        if grouping_column or groups:
+            if grouping_column:
+                metadata_section += f"- Grouping column: {grouping_column}\n"
+            if groups:
+                groups_str = ", ".join(str(g) for g in groups)
+                metadata_section += f"- Groups: {groups_str}\n"
+        
+        metadata_section += "\nWhen describing the plot in your response, reference these exact values from the plot configuration above."
+        
+        return context + metadata_section
 
