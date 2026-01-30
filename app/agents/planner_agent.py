@@ -1,9 +1,9 @@
 """Planner agent for creating execution plans."""
 import mlflow
 import logging
-from pydantic_ai import Agent, RunContext, ModelMessage
+from pydantic_ai import Agent, RunContext, ModelMessage, ModelRequest, ModelResponse, UserPromptPart, TextPart
 from pydantic_ai.models.openai import OpenAIChatModel
-from typing import Optional, List
+from typing import Optional, List, Union
 from pydantic import BaseModel, ConfigDict
 from app.core.models import ExecutionPlan, DatabasePack
 from app.core.config import Config
@@ -12,6 +12,41 @@ from app.tools.schema_tool import SchemaTool
 mlflow.pydantic_ai.autolog()
 
 logger = logging.getLogger(__name__)
+
+
+def filter_tool_calls_from_history(messages: List[ModelMessage]) -> List[ModelMessage]:
+    """
+    Filter message history to only include user messages and assistant text responses.
+    This prevents the planner from seeing previous tool calls which can cause it to
+    repeatedly call tools unnecessarily.
+    
+    Args:
+        messages: Full message history
+        
+    Returns:
+        Filtered message history with only user/assistant text messages
+    """
+    filtered = []
+    for msg in messages:
+        # Only keep ModelRequest (user messages) and ModelResponse (assistant responses)
+        # Filter out any messages that contain tool calls or tool results
+        if isinstance(msg, ModelRequest):
+            # Check if this request only contains user prompt parts (no tool calls)
+            has_only_user_parts = all(
+                isinstance(part, UserPromptPart) for part in msg.parts
+            )
+            if has_only_user_parts:
+                filtered.append(msg)
+        elif isinstance(msg, ModelResponse):
+            # Check if this response only contains text parts (no tool results)
+            has_only_text_parts = all(
+                isinstance(part, TextPart) for part in msg.parts
+            )
+            if has_only_text_parts:
+                filtered.append(msg)
+        # Skip any other message types (tool calls, tool results, etc.)
+    
+    return filtered
 
 
 class PlannerDeps(BaseModel):
@@ -54,12 +89,14 @@ class PlannerAgent:
             provider=model_config.provider,
         )
         
+        # Use Union type: output is either a string (clarification question) or ExecutionPlan
         self.agent = Agent(
             model,
             instructions=prompt_template,
-            output_type=ExecutionPlan,
+            output_type=Union[str, ExecutionPlan],
             deps_type=PlannerDeps,
-            name="planner-agent"
+            name="planner-agent",
+            history_processors=[filter_tool_calls_from_history]
         )
         
         # Register schema summary tool
@@ -82,14 +119,16 @@ class PlannerAgent:
     
     async def run(self, user_message: str, message_history: Optional[List[ModelMessage]] = None):
         """
-        Run the planner agent to create an execution plan.
+        Run the planner agent to create an execution plan or clarification question.
         
         Args:
             user_message: The user's message to plan for
             message_history: Optional message history for conversation context
             
         Returns:
-            Agent result with ExecutionPlan output
+            Agent result with Union[str, ExecutionPlan] output:
+            - str: Clarification question when more information is needed
+            - ExecutionPlan: Complete execution plan when enough information is available
         """
         logger.info("LLM Call: PlannerAgent - creating execution plan")
         deps = PlannerDeps(schema_tool=self.schema_tool)

@@ -56,8 +56,8 @@ class Config:
             AzureModelConfig for the specified agent type
         """
         # Map agent types to models
-        if agent_type == "queryagent":
-            return cls.SMALL_MODEL
-        # All other agents use SMALL_MODEL
+        # if agent_type == "queryagent":
+            # return cls.MEDIUM_MODEL
+        # All other agents use MEDIUM
         return cls.SMALL_MODEL
 

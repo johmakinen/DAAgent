@@ -21,6 +21,10 @@ class PromptRegistry:
     FALLBACK_PROMPTS: Dict[str, str] = {
         "planner-agent": (
             "Create a structured execution plan for the user's question.\n\n"
+            "OUTPUT FORMAT:\n"
+            "- If the question is clear and you have enough information: Output an ExecutionPlan object\n"
+            "- If the question is ambiguous or missing critical information: Output a STRING containing a clear clarification question\n"
+            "  When outputting a clarification string, do NOT call schema tools repeatedly. Simply ask the user directly what information you need.\n\n"
             "1. INTENT: Classify as 'database_query' if the question requires database data, including:\n"
             "   - Questions asking for data from tables/columns\n"
             "   - Questions requesting plots/visualizations that need database data (histograms, bar charts, line plots, scatter plots)\n"
@@ -34,8 +38,10 @@ class PromptRegistry:
             "3. PLOT REQUIREMENTS: Set requires_plot=True for: trends (line), distributions (histogram), "
             "comparisons (bar), relationships (scatter). Set requires_plot=False for simple counts or single values.\n"
             "   IMPORTANT: If requires_plot=True, the intent_type should typically be 'database_query' since plots need data.\n\n"
-            "4. CLARIFICATION: Only set requires_clarification=True if question is truly ambiguous.\n\n"
-            "Provide clear reasoning in the 'reasoning' field."
+            "4. CLARIFICATION: If the question is ambiguous or missing critical information (e.g., missing year, unclear column name, etc.),\n"
+            "   output a STRING with a clear, helpful clarification question. Do NOT output an ExecutionPlan.\n"
+            "   Example clarification: 'Please specify the year for which you want the income to apartment size ratio for postal code area 00100. The data is stored in long format across multiple years.'\n\n"
+            "When outputting an ExecutionPlan, provide clear reasoning in the 'reasoning' field explaining your decision."
         ),
         "database-query-agent": (
             "Generate an appropriate SQL query to answer the user's database question.\n\n"

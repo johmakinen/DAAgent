@@ -1,7 +1,7 @@
 """Multi-agent orchestrator coordinating the agent pipeline."""
 
 from pathlib import Path
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Union
 import mlflow
 import logging
 import hashlib
@@ -155,7 +155,7 @@ class OrchestratorAgent:
     @mlflow.trace(name="create_plan")
     async def _create_plan(
         self, user_message: str, message_history: Optional[List[ModelMessage]] = None
-    ) -> tuple[ExecutionPlan, Any]:
+    ) -> tuple[Union[str, ExecutionPlan], Any]:
         """
         Create an execution plan for the user's message.
 
@@ -164,7 +164,9 @@ class OrchestratorAgent:
             message_history: Optional message history for context
 
         Returns:
-            Tuple of (ExecutionPlan, RunResult) with execution plan
+            Tuple of (Union[str, ExecutionPlan], RunResult):
+            - str: Clarification question when more information is needed
+            - ExecutionPlan: Complete execution plan when enough information is available
         """
         result = await self.planner_agent.run(
             user_message, message_history=message_history
@@ -263,56 +265,35 @@ class OrchestratorAgent:
 
         return session_id, session_state, current_message_history
 
-    @mlflow.trace(name="handle_clarification_or_create_plan")
-    async def _handle_clarification_or_create_plan(
+    @mlflow.trace(name="create_plan")
+    async def _create_plan_with_history(
         self,
         user_input: UserMessage,
-        session_state: dict[str, Any],
         current_message_history: List[ModelMessage],
-    ) -> tuple[ExecutionPlan, str, bool]:
+    ) -> tuple[Union[str, ExecutionPlan], Any]:
         """
-        Handle clarification flow or create execution plan.
+        Create an execution plan for the user's message with full message history.
 
         Args:
             user_input: The user's message as a UserMessage model
-            session_state: Current session state
-            current_message_history: Current message history
+            current_message_history: Current message history (includes user's message)
 
         Returns:
-            Tuple of (ExecutionPlan, user_message_content, is_clarification_response)
+            Tuple of (Union[str, ExecutionPlan], RunResult):
+            - str: Clarification question when more information is needed
+            - ExecutionPlan: Complete execution plan when enough information is available
         """
-        # Handle clarification flow
-        is_clarification_response = (
-            self.clarification_handler.is_clarification_response(session_state)
+        # Create execution plan with full message history
+        # The message history includes all previous messages, including any clarification Q&A
+        plan_or_clarification, plan_result = await self._create_plan(
+            user_input.content, message_history=current_message_history
         )
-
-        if is_clarification_response:
-            # User is responding to clarification
-            user_message_content, intent_classification = (
-                self.clarification_handler.handle_clarification_response(
-                    user_input, session_state
-                )
-            )
-            # Convert IntentClassification to ExecutionPlan for consistency
-            plan = ExecutionPlan(
-                intent_type=intent_classification.intent_type,
-                requires_clarification=intent_classification.requires_clarification,
-                clarification_question=intent_classification.clarification_question,
-                reasoning=intent_classification.reasoning,
-                requires_plot=False,
-                use_cached_data=False,
-                explanation="Clarification response",
-            )
-            self.trace_manager.tag_intent_type(plan.intent_type)
-        else:
-            # Normal flow - create execution plan
-            plan, plan_result = await self._create_plan(
-                user_input.content, message_history=current_message_history
-            )
-            user_message_content = user_input.content
-            self.trace_manager.tag_intent_type(plan.intent_type)
-
-        return plan, user_message_content, is_clarification_response
+        
+        # If it's an ExecutionPlan, tag the intent type
+        if isinstance(plan_or_clarification, ExecutionPlan):
+            self.trace_manager.tag_intent_type(plan_or_clarification.intent_type)
+        
+        return plan_or_clarification, plan_result
 
     @mlflow.trace(name="execute_plan")
     async def _execute_plan(
@@ -398,7 +379,6 @@ class OrchestratorAgent:
         session_id: str,
         session_state: dict[str, Any],
         current_message_history: List[ModelMessage],
-        is_clarification_response: bool,
         user_input: UserMessage,
     ) -> AgentResponse:
         """
@@ -411,7 +391,6 @@ class OrchestratorAgent:
             session_id: Session identifier
             session_state: Current session state
             current_message_history: Current message history
-            is_clarification_response: Whether this is a clarification response
             user_input: Original user input for history update
 
         Returns:
@@ -426,15 +405,11 @@ class OrchestratorAgent:
             execution_plan=plan,
         )
 
-        # Update message history
-        user_msg = (
-            None
-            if is_clarification_response
-            else ModelRequest(parts=[UserPromptPart(content=user_input.content)])
-        )
+        # Update message history - always add assistant response
+        # Note: user message was already added to history before planner ran
         assistant_msg = ModelResponse(parts=[TextPart(content=response.message)])
         self.message_history_manager.add_message_to_history(
-            session_state, user_msg, assistant_msg
+            session_state, None, assistant_msg
         )
 
         # Add metadata
@@ -456,12 +431,13 @@ class OrchestratorAgent:
         Main chat interface implementing the full orchestration flow.
 
         Flow:
-        1. Check for pending clarification and handle accordingly
-        2. PlannerAgent creates execution plan with intent, plot requirements, and data source decisions
-        3. If clarification needed, store state and return clarification question
-        4. Execute plan: use cached data if specified, or execute DatabaseQueryAgent for new queries
-        5. Store new query results in session cache
-        6. SynthesizerAgent creates final user-facing response with plots if needed
+        1. Prepare session and message history
+        2. Add user message to history (so planner sees full conversation context)
+        3. PlannerAgent creates execution plan with intent, plot requirements, and data source decisions
+        4. If clarification needed, add clarification response to history and return
+        5. Execute plan: use cached data if specified, or execute DatabaseQueryAgent for new queries
+        6. Store new query results in session cache
+        7. SynthesizerAgent creates final user-facing response with plots if needed
 
         Args:
             user_input: The user's message as a UserMessage model
@@ -475,29 +451,40 @@ class OrchestratorAgent:
             await self._prepare_session_and_history(user_input, message_history)
         )
 
-        # Handle clarification or create plan
-        plan, user_message_content, is_clarification_response = (
-            await self._handle_clarification_or_create_plan(
-                user_input, session_state, current_message_history
-            )
+        # Add user message to history BEFORE running planner
+        # This ensures the planner sees the full conversation context, including
+        # any previous clarification Q&A and the current user message
+        user_msg = ModelRequest(parts=[UserPromptPart(content=user_input.content)])
+        self.message_history_manager.add_message_to_history(
+            session_state, user_msg, None
+        )
+        # Update current_message_history to include the user's message
+        current_message_history = session_state["message_history"]
+
+        # Create execution plan with full message history
+        plan_or_clarification, _ = await self._create_plan_with_history(
+            user_input, current_message_history
         )
 
-        # Check if clarification is needed
-        if plan.requires_clarification:
-            # Convert ExecutionPlan to IntentClassification for compatibility with clarification handler
+        # Check if planner returned a clarification string
+        if isinstance(plan_or_clarification, str):
+            # Planner returned a clarification question as a string
             intent_classification = IntentClassification(
-                intent_type=plan.intent_type,
-                requires_clarification=plan.requires_clarification,
-                clarification_question=plan.clarification_question,
-                reasoning=plan.reasoning,
+                intent_type="database_query",  # Default, will be re-evaluated after clarification
+                requires_clarification=True,
+                clarification_question=plan_or_clarification,
+                reasoning="User question requires clarification before execution plan can be created.",
             )
             return self.clarification_handler.handle_clarification_request(
                 user_input, intent_classification, session_id, session_state
             )
 
+        # Planner returned an ExecutionPlan - proceed with execution
+        plan = plan_or_clarification
+
         # Execute plan
         agent_output = await self._execute_plan(
-            plan, user_message_content, session_id, current_message_history
+            plan, user_input.content, session_id, current_message_history
         )
 
         # Check if DatabaseQueryAgent needs clarification
@@ -515,13 +502,12 @@ class OrchestratorAgent:
 
         # Finalize response
         return await self._finalize_response(
-            user_message_content,
+            user_input.content,
             agent_output,
             plan,
             session_id,
             session_state,
             current_message_history,
-            is_clarification_response,
             user_input,
         )
 

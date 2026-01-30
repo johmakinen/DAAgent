@@ -12,7 +12,7 @@ class SessionManager:
     
     def __init__(self):
         """Initialize session manager with empty state storage."""
-        # Session state storage: {session_id: {"message_history": [...], "pending_clarification": {...}}}
+        # Session state storage: {session_id: {"message_history": [...], "cached_query_results": {...}}}
         self._session_state: Dict[str, Dict[str, Any]] = {}
     
     def get_or_create_session(
@@ -34,7 +34,6 @@ class SessionManager:
             # New session - initialize with message history from database
             self._session_state[session_id] = {
                 "message_history": message_history or [],
-                "pending_clarification": None,
                 "cached_query_results": {}  # Dict[str, QueryAgentOutput] - keyed by query identifier
             }
         else:
