@@ -130,11 +130,20 @@ def _make_json_serializable(obj: Any) -> Any:
     # Handle basic JSON-serializable types
     elif isinstance(obj, (str, int, float, bool, type(None))):
         return obj
-    # Handle numpy types and other numeric types
-    elif hasattr(obj, 'item'):  # numpy scalar types
-        return obj.item()
-    elif hasattr(obj, 'tolist'):  # numpy arrays
+    # Handle numpy arrays first (they have both tolist and item, but item only works for scalars)
+    elif hasattr(obj, 'tolist'):
         return _make_json_serializable(obj.tolist())
+    # Handle numpy scalar types (0-dimensional arrays)
+    elif hasattr(obj, 'item') and hasattr(obj, 'ndim') and obj.ndim == 0:
+        return obj.item()
+    elif hasattr(obj, 'item'):  # Other types with item() method (but not arrays)
+        try:
+            return obj.item()
+        except (ValueError, AttributeError):
+            # If item() fails, try tolist or convert to string
+            if hasattr(obj, 'tolist'):
+                return _make_json_serializable(obj.tolist())
+            return str(obj)
     else:
         # For other types, try to convert to string or use JSON serialization
         try:
